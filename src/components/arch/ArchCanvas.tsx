@@ -24,14 +24,35 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { ArchElement, ElementType } from "@/lib/arch/types";
 
+export type EdgeKind =
+  | "sync"
+  | "async"
+  | "response"
+  | "fanout"
+  | "direct"
+  | "topic-route"
+  | "headers"
+  | "pubsub"
+  | "owns";
+
 export interface CanvasEdgeData {
-  kind: "sync" | "async" | "response";
+  kind: EdgeKind;
+  label?: string;
+  managed?: boolean;
   [key: string]: unknown;
+}
+
+export interface ManagedEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: EdgeKind;
+  label?: string;
 }
 
 export interface CanvasState {
   positions: Record<string, XYPosition>;
-  edges: { id: string; source: string; target: string; kind: CanvasEdgeData["kind"] }[];
+  edges: { id: string; source: string; target: string; kind: EdgeKind }[];
 }
 
 interface Props {
@@ -40,6 +61,7 @@ interface Props {
   onStateChange: (s: CanvasState) => void;
   activeEdgeKeys: Set<string>; // `${from}->${to}`
   onDropType?: (type: ElementType, pos: XYPosition) => void;
+  managedEdges?: ManagedEdge[];
 }
 
 const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: string }> = {
