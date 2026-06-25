@@ -192,13 +192,26 @@ function ForgePage() {
           </Panel>
         </section>
 
-        {/* Center: architecture + sequence */}
+        {/* Center: architecture canvas + sequence */}
         <section className="col-span-12 lg:col-span-6 space-y-4">
-          <Panel title="Architecture map">
-            <div className="p-3">
-              <MermaidView code={archDiagram} />
-            </div>
+          <Panel
+            title="Architecture canvas"
+            action={
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                drag to add · drag handles to connect · click line to change type
+              </span>
+            }
+          >
+            <DragPalette onAdd={(t) => addElement(t)} />
+            <ArchCanvas
+              elements={elements}
+              state={canvasState}
+              onStateChange={setCanvasState}
+              activeEdgeKeys={activeEdgeKeys}
+              onDropType={(type) => addElement(type)}
+            />
           </Panel>
+
 
           <Panel
             title="Sequence diagram"
