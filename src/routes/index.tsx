@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import { MermaidView } from "@/components/arch/MermaidView";
 import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind } from "@/components/arch/ArchCanvas";
 import { parseSequence } from "@/lib/arch/parser";
+import { importFromMermaid } from "@/lib/arch/import";
 import { simulate } from "@/lib/arch/simulator";
-import type { ArchElement, ElementType, Fault, Severity, TopicKind, TopicBinding } from "@/lib/arch/types";
+import type { ArchElement, BrokerKind, ElementType, Fault, Severity, TopicKind, TopicBinding } from "@/lib/arch/types";
 import { createFileRoute } from "@tanstack/react-router";
 
 
@@ -34,6 +35,11 @@ const TYPE_META: Record<ElementType, { label: string; glyph: string; color: stri
   topic: { label: "Topic", glyph: "✦", color: "var(--color-accent)" },
   cache: { label: "Cache", glyph: "◷", color: "var(--color-success)" },
   external: { label: "External", glyph: "◯", color: "var(--color-muted-foreground)" },
+  "api-gateway": { label: "API Gateway", glyph: "⌥", color: "var(--color-primary)" },
+  lambda: { label: "Lambda / FaaS", glyph: "λ", color: "var(--color-accent)" },
+  scheduler: { label: "Scheduler", glyph: "⏱", color: "var(--color-info)" },
+  stream: { label: "Stream Processor", glyph: "⌇", color: "var(--color-warning)" },
+  saga: { label: "Saga Orchestrator", glyph: "⎈", color: "var(--color-success)" },
 };
 
 const DEFAULT_ELEMENTS: ArchElement[] = [
@@ -179,6 +185,118 @@ const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   Q_SMS-)SMS: deliver
 `,
   },
+  snsSqs: {
+    elements: [
+      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"] },
+      { id: "DB", name: "Orders DB", type: "database" },
+      { id: "SNS", name: "orders-topic", type: "topic", topicKind: "fanout", broker: "sns",
+        bindings: [{ queueId: "Q_MAIL", filter: "eventType=OrderPlaced" }, { queueId: "Q_ANALYTICS" }] },
+      { id: "Q_MAIL", name: "mail-queue", type: "queue", broker: "sqs", hasInbox: true,
+        visibilityTimeoutSec: 30, maxReceives: 5, dlqId: "DLQ_MAIL", retentionHours: 96 },
+      { id: "DLQ_MAIL", name: "mail-dlq", type: "queue", broker: "sqs", retentionHours: 336 },
+      { id: "Q_ANALYTICS", name: "analytics-queue", type: "queue", broker: "sqs", fifo: true,
+        hasInbox: true, visibilityTimeoutSec: 60 },
+      { id: "MAIL", name: "Email Worker", type: "lambda", idempotent: true, hasInbox: true },
+      { id: "ANALY", name: "Analytics Worker", type: "service", idempotent: true, hasInbox: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant DB
+  participant SNS
+  participant Q_MAIL
+  participant Q_ANALYTICS
+  participant MAIL
+  participant ANALY
+
+  API->>DB: insert order + outbox row
+  Note over API: db write committed
+  API-)SNS: OrderPlaced
+  SNS-)Q_MAIL: OrderPlaced
+  SNS-)Q_ANALYTICS: OrderPlaced
+  Q_MAIL-)MAIL: deliver
+  Q_ANALYTICS-)ANALY: deliver
+`,
+  },
+  kafkaStream: {
+    elements: [
+      { id: "GW", name: "API Gateway", type: "api-gateway" },
+      { id: "API", name: "Ingest Svc", type: "service", hasOutbox: true, dataStores: ["DB"] },
+      { id: "DB", name: "Ingest DB", type: "database" },
+      { id: "KAFKA", name: "events", type: "topic", topicKind: "pubsub", broker: "kafka",
+        partitions: 12, schemaContract: true, bindings: [{ queueId: "CG_PROC" }, { queueId: "CG_AUDIT" }] },
+      { id: "CG_PROC", name: "processors-cg", type: "queue", broker: "kafka", consumerGroup: "processors", hasInbox: true },
+      { id: "CG_AUDIT", name: "audit-cg", type: "queue", broker: "kafka", consumerGroup: "audit", hasInbox: true },
+      { id: "STREAM", name: "Enrichment Stream", type: "stream", idempotent: true },
+      { id: "AUDIT", name: "Audit Sink", type: "service", idempotent: true, dataStores: ["WAREHOUSE"] },
+      { id: "WAREHOUSE", name: "Data Warehouse", type: "database" },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant GW
+  participant API
+  participant DB
+  participant KAFKA
+  participant CG_PROC
+  participant STREAM
+  participant CG_AUDIT
+  participant AUDIT
+
+  GW->>API: POST /events
+  API->>DB: persist
+  Note over API: db write committed
+  API-)KAFKA: event.raw
+  KAFKA-)CG_PROC: event.raw
+  CG_PROC-)STREAM: process
+  STREAM-)KAFKA: event.enriched
+  KAFKA-)CG_AUDIT: event.enriched
+  CG_AUDIT-)AUDIT: persist
+`,
+  },
+  sagaOrchestrator: {
+    elements: [
+      { id: "API", name: "Checkout API", type: "service" },
+      { id: "SAGA", name: "Checkout Saga", type: "saga", idempotent: true, dataStores: ["SDB"] },
+      { id: "SDB", name: "Saga State", type: "database" },
+      { id: "BUS", name: "commands", type: "topic", topicKind: "direct", broker: "rabbitmq",
+        bindings: [
+          { queueId: "Q_PAY", routingKey: "payment" },
+          { queueId: "Q_INV", routingKey: "inventory" },
+          { queueId: "Q_SHIP", routingKey: "shipping" },
+        ] },
+      { id: "Q_PAY", name: "payment.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
+      { id: "Q_INV", name: "inventory.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
+      { id: "Q_SHIP", name: "shipping.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
+      { id: "PAY", name: "Payment Svc", type: "service", idempotent: true },
+      { id: "INV", name: "Inventory Svc", type: "service", idempotent: true },
+      { id: "SHIP", name: "Shipping Svc", type: "service", idempotent: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant SAGA
+  participant BUS
+  participant Q_PAY
+  participant PAY
+  participant Q_INV
+  participant INV
+  participant Q_SHIP
+  participant SHIP
+
+  API->>SAGA: start checkout
+  SAGA-)BUS: payment.charge
+  BUS-)Q_PAY: payment.charge
+  Q_PAY-)PAY: charge
+  PAY-)SAGA: payment.ok
+  SAGA-)BUS: inventory.reserve
+  BUS-)Q_INV: inventory.reserve
+  Q_INV-)INV: reserve
+  INV-)SAGA: inventory.ok
+  SAGA-)BUS: shipping.dispatch
+  BUS-)Q_SHIP: shipping.dispatch
+  Q_SHIP-)SHIP: dispatch
+`,
+  },
 };
 
 function uid() {
@@ -253,6 +371,15 @@ function ForgePage() {
           });
         }
       }
+      if (el.type === "queue" && el.dlqId && elementIds.has(el.dlqId)) {
+        out.push({
+          id: `mng:dlq:${el.id}->${el.dlqId}`,
+          source: el.id,
+          target: el.dlqId,
+          kind: "dlq",
+          label: `DLQ${el.maxReceives ? ` · max ${el.maxReceives}` : ""}`,
+        });
+      }
     }
     return out;
   }, [elements]);
@@ -262,7 +389,11 @@ function ForgePage() {
   function addElement(type: ElementType) {
     const id = uid();
     const extra: Partial<ArchElement> =
-      type === "topic" ? { topicKind: "fanout", bindings: [] } : {};
+      type === "topic"
+        ? { topicKind: "fanout", bindings: [], broker: "generic" }
+        : type === "queue"
+          ? { broker: "generic" }
+          : {};
     setElements((es) => [
       ...es,
       { id, name: `${TYPE_META[type].label} ${id}`, type, hasInbox: false, hasOutbox: false, idempotent: false, ...extra },
@@ -303,6 +434,24 @@ function ForgePage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const { elements: imported, edges: importedEdges } = importFromMermaid(seqCode, elements);
+                setElements(imported);
+                setCanvasState((s) => {
+                  // merge: keep existing user edges, add any new ones from import
+                  const existingKeys = new Set(s.edges.map((e) => `${e.source}->${e.target}:${e.kind}`));
+                  const additions = importedEdges
+                    .filter((e) => !existingKeys.has(`${e.source}->${e.target}:${e.kind}`))
+                    .map((e) => ({ id: e.id, source: e.source, target: e.target, kind: e.kind as EdgeKind }));
+                  return { positions: s.positions, edges: [...s.edges, ...additions] };
+                });
+              }}
+              className="text-xs px-2 py-1 rounded-md border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
+              title="Parse the sequence diagram and create matching components + connections"
+            >
+              ⇪ Import from Mermaid
+            </button>
             <select
               className="bg-surface-2 border border-border rounded-md px-2 py-1 text-xs"
               value=""
@@ -323,6 +472,9 @@ function ForgePage() {
               <option value="cqrs">CQRS + Read Model</option>
               <option value="saga">Choreography Saga</option>
               <option value="fanout">Fan-out Notifications</option>
+              <option value="snsSqs">SNS → SQS (fanout + DLQ)</option>
+              <option value="kafkaStream">Kafka Stream Processing</option>
+              <option value="sagaOrchestrator">Saga Orchestrator</option>
             </select>
             <Pill tone="info">{parsed.steps.length} steps</Pill>
             <Pill tone={result.summary.errors ? "error" : "success"}>
@@ -726,6 +878,73 @@ function ElementCard({
           </Toggle>
         </div>
       )}
+      {(el.type === "queue" || el.type === "topic") && (
+        <div className="space-y-1.5 pt-1 border-t border-border/60">
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground w-14">
+              broker
+            </label>
+            <select
+              value={el.broker ?? "generic"}
+              onChange={(e) => onChange({ broker: e.target.value as BrokerKind })}
+              className="text-[11px] bg-surface border border-border rounded px-1.5 py-0.5 flex-1 outline-none"
+            >
+              {(["generic", "rabbitmq", "sqs", "sns", "kafka", "eventbridge", "redis-streams", "gcp-pubsub"] as BrokerKind[]).map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </div>
+          {el.type === "queue" && (
+            <div className="grid grid-cols-2 gap-1">
+              {(el.broker === "sqs" || el.broker === "rabbitmq") && (
+                <Toggle on={!!el.fifo} onChange={(v) => onChange({ fifo: v })}>fifo</Toggle>
+              )}
+              {el.broker === "kafka" && (
+                <NumField label="parts" value={el.partitions} onChange={(v) => onChange({ partitions: v })} />
+              )}
+              {(el.broker === "kafka" || el.broker === "gcp-pubsub") && (
+                <TextField label="group" value={el.consumerGroup} onChange={(v) => onChange({ consumerGroup: v })} />
+              )}
+              {(el.broker === "sqs" || el.broker === "rabbitmq") && (
+                <NumField label="vis(s)" value={el.visibilityTimeoutSec} onChange={(v) => onChange({ visibilityTimeoutSec: v })} />
+              )}
+              {el.broker === "sqs" && (
+                <NumField label="maxRx" value={el.maxReceives} onChange={(v) => onChange({ maxReceives: v })} />
+              )}
+              <NumField label="ret(h)" value={el.retentionHours} onChange={(v) => onChange({ retentionHours: v })} />
+              <div className="col-span-2 flex items-center gap-1">
+                <label className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">dlq</label>
+                <select
+                  value={el.dlqId ?? ""}
+                  onChange={(e) => onChange({ dlqId: e.target.value || undefined })}
+                  className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1"
+                >
+                  <option value="">— none —</option>
+                  {queues.filter((q) => q.id !== el.id).map((q) => (
+                    <option key={q.id} value={q.id}>{q.id} · {q.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+          {el.type === "topic" && (
+            <div className="grid grid-cols-2 gap-1">
+              {el.broker === "kafka" && (
+                <>
+                  <NumField label="parts" value={el.partitions} onChange={(v) => onChange({ partitions: v })} />
+                  <Toggle on={!!el.schemaContract} onChange={(v) => onChange({ schemaContract: v })}>schema</Toggle>
+                </>
+              )}
+              {(el.broker === "sns" || el.broker === "eventbridge") && (
+                <div className="col-span-2">
+                  <TextField label="filter" value={el.filterPolicy} onChange={(v) => onChange({ filterPolicy: v })} />
+                </div>
+              )}
+              <NumField label="ret(h)" value={el.retentionHours} onChange={(v) => onChange({ retentionHours: v })} />
+            </div>
+          )}
+        </div>
+      )}
       {el.type === "topic" && (
         <div className="space-y-2 pt-1 border-t border-border/60">
           <div className="flex items-center gap-2">
@@ -855,6 +1074,33 @@ function ElementCard({
   );
 }
 
+function NumField({ label, value, onChange }: { label: string; value?: number; onChange: (v: number | undefined) => void }) {
+  return (
+    <label className="flex items-center gap-1">
+      <span className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">{label}</span>
+      <input
+        type="number"
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
+        className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-full min-w-0"
+      />
+    </label>
+  );
+}
+
+function TextField({ label, value, onChange }: { label: string; value?: string; onChange: (v: string | undefined) => void }) {
+  return (
+    <label className="flex items-center gap-1">
+      <span className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">{label}</span>
+      <input
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-full min-w-0"
+      />
+    </label>
+  );
+}
+
 function Toggle({
   on,
   onChange,
@@ -890,6 +1136,11 @@ function buildArchDiagram(
     topic: (id, l) => `${id}{{"${l}"}}`,
     cache: (id, l) => `${id}[\\"${l}"\\]`,
     external: (id, l) => `${id}(("${l}"))`,
+    "api-gateway": (id, l) => `${id}>"${l}"]`,
+    lambda: (id, l) => `${id}(["${l}"])`,
+    scheduler: (id, l) => `${id}{{"${l}"}}`,
+    stream: (id, l) => `${id}[/"${l}"\\]`,
+    saga: (id, l) => `${id}(["${l}"])`,
   };
   for (const e of elements) {
     const tags = [
