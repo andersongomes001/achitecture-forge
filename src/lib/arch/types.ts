@@ -23,6 +23,8 @@ export interface ArchElement {
   // topic-only
   topicKind?: TopicKind;
   bindings?: TopicBinding[];
+  // service-only: owned databases / caches
+  dataStores?: string[]; // ArchElement.id list
 }
 
 export type StepKind = "sync" | "async" | "response" | "note";

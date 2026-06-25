@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { MermaidView } from "@/components/arch/MermaidView";
-import { ArchCanvas, type CanvasState } from "@/components/arch/ArchCanvas";
+import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind } from "@/components/arch/ArchCanvas";
 import { parseSequence } from "@/lib/arch/parser";
 import { simulate } from "@/lib/arch/simulator";
 import type { ArchElement, ElementType, Fault, Severity, TopicKind, TopicBinding } from "@/lib/arch/types";
@@ -57,6 +57,130 @@ const DEFAULT_SEQ = `sequenceDiagram
   WORKER->>WORKER: send confirmation email
 `;
 
+const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
+  outbox: {
+    elements: [
+      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"] },
+      { id: "DB", name: "Orders DB", type: "database" },
+      { id: "RELAY", name: "Outbox Relay", type: "service", idempotent: true },
+      { id: "BUS", name: "Events Bus", type: "topic", topicKind: "fanout", bindings: [{ queueId: "Q_MAIL" }] },
+      { id: "Q_MAIL", name: "Mail Queue", type: "queue", hasInbox: true },
+      { id: "MAIL", name: "Email Worker", type: "service", hasInbox: true, idempotent: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant DB
+  participant RELAY
+  participant BUS
+  participant Q_MAIL
+  participant MAIL
+
+  API->>DB: insert order + outbox row
+  Note over API: db write committed
+  RELAY->>DB: poll outbox
+  RELAY-)BUS: OrderPlaced
+  BUS-)Q_MAIL: OrderPlaced
+  Q_MAIL-)MAIL: OrderPlaced
+  MAIL->>MAIL: send email
+`,
+  },
+  cqrs: {
+    elements: [
+      { id: "API", name: "Write API", type: "service", dataStores: ["WDB"] },
+      { id: "WDB", name: "Write DB", type: "database" },
+      { id: "BUS", name: "Domain Events", type: "topic", topicKind: "pubsub", bindings: [{ queueId: "Q_PROJ" }] },
+      { id: "Q_PROJ", name: "Projector Queue", type: "queue", hasInbox: true },
+      { id: "PROJ", name: "Projector", type: "service", idempotent: true, dataStores: ["RDB"] },
+      { id: "RDB", name: "Read Model", type: "database" },
+      { id: "READ", name: "Query API", type: "service", dataStores: ["RDB"] },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant WDB
+  participant BUS
+  participant Q_PROJ
+  participant PROJ
+  participant RDB
+  participant READ
+
+  API->>WDB: persist command
+  API-)BUS: OrderChanged
+  BUS-)Q_PROJ: OrderChanged
+  Q_PROJ-)PROJ: OrderChanged
+  PROJ->>RDB: upsert read model
+  READ->>RDB: query
+`,
+  },
+  saga: {
+    elements: [
+      { id: "ORDER", name: "Order Svc", type: "service", hasOutbox: true, idempotent: true, dataStores: ["ODB"] },
+      { id: "ODB", name: "Order DB", type: "database" },
+      { id: "BUS", name: "Saga Bus", type: "topic", topicKind: "topic", bindings: [
+        { queueId: "Q_PAY", routingKey: "order.*" },
+        { queueId: "Q_INV", routingKey: "order.*" },
+      ] },
+      { id: "Q_PAY", name: "Payment Q", type: "queue", hasInbox: true },
+      { id: "Q_INV", name: "Inventory Q", type: "queue", hasInbox: true },
+      { id: "PAY", name: "Payment Svc", type: "service", idempotent: true },
+      { id: "INV", name: "Inventory Svc", type: "service", idempotent: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant ORDER
+  participant ODB
+  participant BUS
+  participant Q_PAY
+  participant PAY
+  participant Q_INV
+  participant INV
+
+  ORDER->>ODB: create order pending
+  ORDER-)BUS: order.created
+  BUS-)Q_PAY: order.created
+  BUS-)Q_INV: order.created
+  Q_PAY-)PAY: order.created
+  Q_INV-)INV: order.created
+  PAY-)BUS: order.paid
+  INV-)BUS: order.reserved
+`,
+  },
+  fanout: {
+    elements: [
+      { id: "API", name: "Publisher", type: "service" },
+      { id: "BUS", name: "Notify Topic", type: "topic", topicKind: "fanout", bindings: [
+        { queueId: "Q_PUSH" }, { queueId: "Q_MAIL" }, { queueId: "Q_SMS" },
+      ] },
+      { id: "Q_PUSH", name: "Push Queue", type: "queue", hasInbox: true },
+      { id: "Q_MAIL", name: "Mail Queue", type: "queue", hasInbox: true },
+      { id: "Q_SMS", name: "SMS Queue", type: "queue", hasInbox: true },
+      { id: "PUSH", name: "Push Worker", type: "service", idempotent: true },
+      { id: "MAIL", name: "Mail Worker", type: "service", idempotent: true },
+      { id: "SMS", name: "SMS Worker", type: "service", idempotent: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant BUS
+  participant Q_PUSH
+  participant Q_MAIL
+  participant Q_SMS
+  participant PUSH
+  participant MAIL
+  participant SMS
+
+  API-)BUS: UserSignedUp
+  BUS-)Q_PUSH: UserSignedUp
+  BUS-)Q_MAIL: UserSignedUp
+  BUS-)Q_SMS: UserSignedUp
+  Q_PUSH-)PUSH: deliver
+  Q_MAIL-)MAIL: deliver
+  Q_SMS-)SMS: deliver
+`,
+  },
+};
+
 function uid() {
   return Math.random().toString(36).slice(2, 7).toUpperCase();
 }
@@ -81,6 +205,58 @@ function ForgePage() {
     if (s?.from && s?.to) set.add(`${s.from}->${s.to}`);
     return set;
   }, [currentStep, parsed.steps]);
+
+  // Auto-generated edges from element configuration:
+  //  - topic bindings -> visual edge per exchange kind
+  //  - service.dataStores -> "owns" edge to each db/cache
+  const managedEdges = useMemo<ManagedEdge[]>(() => {
+    const out: ManagedEdge[] = [];
+    const elementIds = new Set(elements.map((e) => e.id));
+    for (const el of elements) {
+      if (el.type === "topic" && el.bindings?.length) {
+        const kindMap: Record<TopicKind, EdgeKind> = {
+          fanout: "fanout",
+          direct: "direct",
+          topic: "topic-route",
+          headers: "headers",
+          pubsub: "pubsub",
+        };
+        const tKind = el.topicKind ?? "fanout";
+        for (const b of el.bindings) {
+          if (!b.queueId || !elementIds.has(b.queueId)) continue;
+          const label =
+            tKind === "fanout"
+              ? "fanout"
+              : tKind === "pubsub"
+                ? "pub/sub"
+                : tKind === "headers"
+                  ? `hdr:${b.routingKey ?? ""}`
+                  : b.routingKey || tKind;
+          out.push({
+            id: `mng:bind:${el.id}->${b.queueId}:${b.routingKey ?? ""}`,
+            source: el.id,
+            target: b.queueId,
+            kind: kindMap[tKind],
+            label,
+          });
+        }
+      }
+      if (el.type === "service" && el.dataStores?.length) {
+        for (const dsId of el.dataStores) {
+          if (!elementIds.has(dsId)) continue;
+          out.push({
+            id: `mng:owns:${el.id}->${dsId}`,
+            source: el.id,
+            target: dsId,
+            kind: "owns",
+            label: "owns",
+          });
+        }
+      }
+    }
+    return out;
+  }, [elements]);
+
 
 
   function addElement(type: ElementType) {
@@ -127,6 +303,27 @@ function ForgePage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <select
+              className="bg-surface-2 border border-border rounded-md px-2 py-1 text-xs"
+              value=""
+              onChange={(e) => {
+                const t = e.target.value as keyof typeof TEMPLATES;
+                if (t && TEMPLATES[t]) {
+                  setElements(TEMPLATES[t].elements);
+                  setSeqCode(TEMPLATES[t].seq);
+                  setCanvasState({ positions: {}, edges: [] });
+                  setFaults([]);
+                }
+                e.currentTarget.value = "";
+              }}
+              title="Load architecture pattern template"
+            >
+              <option value="">⌬ Templates…</option>
+              <option value="outbox">Transactional Outbox</option>
+              <option value="cqrs">CQRS + Read Model</option>
+              <option value="saga">Choreography Saga</option>
+              <option value="fanout">Fan-out Notifications</option>
+            </select>
             <Pill tone="info">{parsed.steps.length} steps</Pill>
             <Pill tone={result.summary.errors ? "error" : "success"}>
               {result.summary.errors} errors
@@ -167,6 +364,7 @@ function ForgePage() {
                   key={el.id}
                   el={el}
                   queues={elements.filter((e) => e.type === "queue")}
+                  databases={elements.filter((e) => e.type === "database" || e.type === "cache")}
                   onChange={(p) => patchEl(el.id, p)}
                   onRemove={() => removeEl(el.id)}
                 />
@@ -211,9 +409,11 @@ function ForgePage() {
               state={canvasState}
               onStateChange={setCanvasState}
               activeEdgeKeys={activeEdgeKeys}
+              managedEdges={managedEdges}
               onDropType={(type) => addElement(type)}
             />
           </Panel>
+
 
 
           <Panel
@@ -450,11 +650,13 @@ function FaultBtn({
 function ElementCard({
   el,
   queues,
+  databases,
   onChange,
   onRemove,
 }: {
   el: ArchElement;
   queues: ArchElement[];
+  databases: ArchElement[];
   onChange: (p: Partial<ArchElement>) => void;
   onRemove: () => void;
 }) {
@@ -594,6 +796,59 @@ function ElementCard({
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {el.type === "service" && (
+        <div className="space-y-1 pt-1 border-t border-border/60">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              data stores ({el.dataStores?.length ?? 0})
+            </span>
+            <button
+              onClick={() => {
+                const first = databases.find((d) => !el.dataStores?.includes(d.id));
+                if (!first) return;
+                onChange({ dataStores: [...(el.dataStores ?? []), first.id] });
+              }}
+              disabled={databases.length === 0 || (el.dataStores?.length ?? 0) >= databases.length}
+              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-info hover:border-info/60 disabled:opacity-40"
+            >
+              + bind store
+            </button>
+          </div>
+          {databases.length === 0 && (
+            <p className="text-[10px] text-muted-foreground italic">
+              add a database or cache to bind it.
+            </p>
+          )}
+          {(el.dataStores ?? []).map((dsId, i) => (
+            <div key={`${dsId}-${i}`} className="flex items-center gap-1">
+              <select
+                value={dsId}
+                onChange={(e) => {
+                  const next = [...(el.dataStores ?? [])];
+                  next[i] = e.target.value;
+                  onChange({ dataStores: next });
+                }}
+                className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0"
+              >
+                {databases.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.id} · {d.name} ({d.type})
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() =>
+                  onChange({ dataStores: (el.dataStores ?? []).filter((_, idx) => idx !== i) })
+                }
+                className="text-muted-foreground hover:text-destructive text-[10px] px-1"
+                aria-label="unbind"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>

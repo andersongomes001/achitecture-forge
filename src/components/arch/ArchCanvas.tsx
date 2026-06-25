@@ -24,14 +24,35 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { ArchElement, ElementType } from "@/lib/arch/types";
 
+export type EdgeKind =
+  | "sync"
+  | "async"
+  | "response"
+  | "fanout"
+  | "direct"
+  | "topic-route"
+  | "headers"
+  | "pubsub"
+  | "owns";
+
 export interface CanvasEdgeData {
-  kind: "sync" | "async" | "response";
+  kind: EdgeKind;
+  label?: string;
+  managed?: boolean;
   [key: string]: unknown;
+}
+
+export interface ManagedEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: EdgeKind;
+  label?: string;
 }
 
 export interface CanvasState {
   positions: Record<string, XYPosition>;
-  edges: { id: string; source: string; target: string; kind: CanvasEdgeData["kind"] }[];
+  edges: { id: string; source: string; target: string; kind: EdgeKind }[];
 }
 
 interface Props {
@@ -40,6 +61,7 @@ interface Props {
   onStateChange: (s: CanvasState) => void;
   activeEdgeKeys: Set<string>; // `${from}->${to}`
   onDropType?: (type: ElementType, pos: XYPosition) => void;
+  managedEdges?: ManagedEdge[];
 }
 
 const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: string }> = {
@@ -127,13 +149,21 @@ function ArchNode({ data, selected }: NodeProps) {
 
 const nodeTypes: NodeTypes = { arch: ArchNode };
 
-const EDGE_STYLE: Record<CanvasEdgeData["kind"], { stroke: string; dasharray?: string }> = {
+const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?: number }> = {
   sync: { stroke: "var(--color-primary)" },
   async: { stroke: "var(--color-warning)", dasharray: "6 4" },
   response: { stroke: "var(--color-info)", dasharray: "2 3" },
+  fanout: { stroke: "var(--color-warning)", width: 2.4 },
+  direct: { stroke: "var(--color-primary)", width: 2 },
+  "topic-route": { stroke: "var(--color-accent)", dasharray: "8 3 2 3", width: 1.8 },
+  headers: { stroke: "var(--color-info)", dasharray: "1 4", width: 2 },
+  pubsub: { stroke: "var(--color-success)", dasharray: "10 3", width: 2.2 },
+  owns: { stroke: "var(--color-muted-foreground)", dasharray: "3 3", width: 1.2 },
 };
 
-function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropType }: Props) {
+const CYCLABLE: ReadonlySet<EdgeKind> = new Set(["sync", "async", "response"]);
+
+function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropType, managedEdges = [] }: Props) {
   const positionsRef = useRef(state.positions);
   positionsRef.current = state.positions;
 
@@ -168,7 +198,10 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
       const byId = new Map(curr.map((n) => [n.id, n]));
       const keep = elements.map((el, i) => {
         const existing = byId.get(el.id);
-        const orphan = !edges.some((e) => e.source === el.id || e.target === el.id);
+        const connected =
+          edges.some((e) => e.source === el.id || e.target === el.id) ||
+          managedEdges.some((e) => e.source === el.id || e.target === el.id);
+        const orphan = !connected;
         if (existing) {
           return { ...existing, data: { element: el, orphan } };
         }
@@ -183,28 +216,51 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
       });
       return keep;
     });
-  }, [elements, edges, setNodes]);
+  }, [elements, edges, managedEdges, setNodes]);
 
-  // style edges with kind + active highlighting
+  // style edges with kind + active highlighting; merge managed edges
   const styledEdges = useMemo<Edge[]>(() => {
-    return edges.map((e) => {
-      const kind = ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as CanvasEdgeData["kind"];
+    const all: Array<{ e: Edge; kind: EdgeKind; label?: string; managed: boolean }> = [];
+    for (const e of edges) {
+      const data = e.data as CanvasEdgeData | undefined;
+      all.push({ e, kind: (data?.kind ?? "sync") as EdgeKind, label: data?.label, managed: false });
+    }
+    for (const m of managedEdges) {
+      all.push({
+        e: {
+          id: m.id,
+          source: m.source,
+          target: m.target,
+          data: { kind: m.kind, label: m.label, managed: true },
+        } as Edge,
+        kind: m.kind,
+        label: m.label,
+        managed: true,
+      });
+    }
+    return all.map(({ e, kind, label, managed }) => {
       const style = EDGE_STYLE[kind];
       const active = activeEdgeKeys.has(`${e.source}->${e.target}`);
       return {
         ...e,
         animated: true,
+        label,
+        labelStyle: { fill: "var(--color-foreground)", fontSize: 10, fontFamily: "var(--font-mono)" },
+        labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.85 },
+        labelBgPadding: [4, 2] as [number, number],
+        labelBgBorderRadius: 3,
         style: {
           stroke: active ? "var(--color-accent)" : style.stroke,
-          strokeWidth: active ? 2.5 : 1.6,
+          strokeWidth: active ? 2.8 : style.width ?? 1.6,
           strokeDasharray: style.dasharray,
+          opacity: managed ? 0.95 : 1,
           filter: active ? "drop-shadow(0 0 6px var(--color-accent))" : undefined,
         },
-      };
+      } as Edge;
     });
-  }, [edges, activeEdgeKeys]);
+  }, [edges, managedEdges, activeEdgeKeys]);
 
-  // emit state upward on changes
+  // emit state upward on changes (only user-owned edges, never managed)
   function emitState(nextNodes: Node[], nextEdges: Edge[]) {
     const positions: Record<string, XYPosition> = {};
     for (const n of nextNodes) positions[n.id] = n.position;
@@ -214,7 +270,7 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
         id: e.id,
         source: e.source,
         target: e.target,
-        kind: ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as CanvasEdgeData["kind"],
+        kind: ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as EdgeKind,
       })),
     });
   }
@@ -285,14 +341,16 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
         onEdgeClick={(_, edge) => {
-          // cycle edge kind on click
+          // managed edges (bindings) are not cyclable
+          const data = edge.data as CanvasEdgeData | undefined;
+          if (data?.managed || !CYCLABLE.has((data?.kind ?? "sync") as EdgeKind)) return;
           setEdges((curr) => {
             const next = curr.map((e) => {
               if (e.id !== edge.id) return e;
-              const kind = ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as CanvasEdgeData["kind"];
-              const nextKind: CanvasEdgeData["kind"] =
+              const kind = ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as EdgeKind;
+              const nextKind: EdgeKind =
                 kind === "sync" ? "async" : kind === "async" ? "response" : "sync";
-              return { ...e, data: { kind: nextKind } };
+              return { ...e, data: { ...(e.data ?? {}), kind: nextKind } };
             });
             emitState(nodes, next);
             return next;
