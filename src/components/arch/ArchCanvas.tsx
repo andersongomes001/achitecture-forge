@@ -299,6 +299,7 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
           });
         }}
         fitView
+        connectionMode={ConnectionMode.Loose}
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{ animated: true }}
       >
