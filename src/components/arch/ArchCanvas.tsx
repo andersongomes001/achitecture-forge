@@ -71,7 +71,23 @@ function ArchNode({ data, selected }: NodeProps) {
         selected ? "border-primary" : "border-border"
       }`}
     >
-      <Handle type="target" position={Position.Left} className="!bg-primary !w-2 !h-2" />
+  const handleClass =
+    "!w-3 !h-3 !bg-primary !border !border-background hover:!bg-accent transition-colors";
+  const topicMeta =
+    d.element.type === "topic"
+      ? `${d.element.topicKind ?? "fanout"} · ${d.element.bindings?.length ?? 0} bind`
+      : null;
+  return (
+    <div
+      className={`relative rounded-md border bg-surface px-3 py-2 min-w-[160px] shadow-sm transition-colors ${
+        selected ? "border-primary" : "border-border"
+      }`}
+    >
+      {/* dual-mode handles on all 4 sides for easy connection (loose mode) */}
+      <Handle id="l" type="source" position={Position.Left} className={handleClass} />
+      <Handle id="r" type="source" position={Position.Right} className={handleClass} />
+      <Handle id="t" type="source" position={Position.Top} className={handleClass} />
+      <Handle id="b" type="source" position={Position.Bottom} className={handleClass} />
       <div className="flex items-center gap-2">
         <span
           className="w-6 h-6 grid place-items-center rounded border border-border font-mono text-sm"
@@ -86,6 +102,11 @@ function ArchNode({ data, selected }: NodeProps) {
           </div>
         </div>
       </div>
+      {topicMeta && (
+        <div className="mt-1 text-[9px] uppercase tracking-wider text-accent mono">
+          {topicMeta}
+        </div>
+      )}
       {tags.length > 0 && (
         <div className="mt-1.5 flex gap-1 flex-wrap">
           {tags.map((t) => (
@@ -106,7 +127,6 @@ function ArchNode({ data, selected }: NodeProps) {
           ✕
         </span>
       )}
-      <Handle type="source" position={Position.Right} className="!bg-primary !w-2 !h-2" />
     </div>
   );
 }
