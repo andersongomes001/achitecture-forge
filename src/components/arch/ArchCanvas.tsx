@@ -97,8 +97,10 @@ function ArchNode({ data, selected }: NodeProps) {
     "!w-3 !h-3 !bg-primary !border !border-background hover:!bg-accent transition-colors";
   const topicMeta =
     d.element.type === "topic"
-      ? `${d.element.topicKind ?? "fanout"} · ${d.element.bindings?.length ?? 0} bind`
-      : null;
+      ? `${d.element.broker ?? "generic"} · ${d.element.topicKind ?? "fanout"} · ${d.element.bindings?.length ?? 0} bind`
+      : d.element.type === "queue"
+        ? `${d.element.broker ?? "generic"}${d.element.fifo ? " · fifo" : ""}${d.element.consumerGroup ? ` · cg:${d.element.consumerGroup}` : ""}${d.element.partitions ? ` · p${d.element.partitions}` : ""}${d.element.dlqId ? " · dlq" : ""}`
+        : null;
   return (
     <div
       className={`relative rounded-md border bg-surface px-3 py-2 min-w-[160px] shadow-sm transition-colors ${
