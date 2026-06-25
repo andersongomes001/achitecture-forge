@@ -318,6 +318,24 @@ function ForgePage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const { elements: imported, edges: importedEdges } = importFromMermaid(seqCode, elements);
+                setElements(imported);
+                setCanvasState((s) => {
+                  // merge: keep existing user edges, add any new ones from import
+                  const existingKeys = new Set(s.edges.map((e) => `${e.source}->${e.target}:${e.kind}`));
+                  const additions = importedEdges
+                    .filter((e) => !existingKeys.has(`${e.source}->${e.target}:${e.kind}`))
+                    .map((e) => ({ id: e.id, source: e.source, target: e.target, kind: e.kind as EdgeKind }));
+                  return { positions: s.positions, edges: [...s.edges, ...additions] };
+                });
+              }}
+              className="text-xs px-2 py-1 rounded-md border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
+              title="Parse the sequence diagram and create matching components + connections"
+            >
+              ⇪ Import from Mermaid
+            </button>
             <select
               className="bg-surface-2 border border-border rounded-md px-2 py-1 text-xs"
               value=""
@@ -338,6 +356,9 @@ function ForgePage() {
               <option value="cqrs">CQRS + Read Model</option>
               <option value="saga">Choreography Saga</option>
               <option value="fanout">Fan-out Notifications</option>
+              <option value="snsSqs">SNS → SQS (fanout + DLQ)</option>
+              <option value="kafkaStream">Kafka Stream Processing</option>
+              <option value="sagaOrchestrator">Saga Orchestrator</option>
             </select>
             <Pill tone="info">{parsed.steps.length} steps</Pill>
             <Pill tone={result.summary.errors ? "error" : "success"}>
