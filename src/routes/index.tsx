@@ -874,6 +874,73 @@ function ElementCard({
           </Toggle>
         </div>
       )}
+      {(el.type === "queue" || el.type === "topic") && (
+        <div className="space-y-1.5 pt-1 border-t border-border/60">
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground w-14">
+              broker
+            </label>
+            <select
+              value={el.broker ?? "generic"}
+              onChange={(e) => onChange({ broker: e.target.value as BrokerKind })}
+              className="text-[11px] bg-surface border border-border rounded px-1.5 py-0.5 flex-1 outline-none"
+            >
+              {(["generic", "rabbitmq", "sqs", "sns", "kafka", "eventbridge", "redis-streams", "gcp-pubsub"] as BrokerKind[]).map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </div>
+          {el.type === "queue" && (
+            <div className="grid grid-cols-2 gap-1">
+              {(el.broker === "sqs" || el.broker === "rabbitmq") && (
+                <Toggle on={!!el.fifo} onChange={(v) => onChange({ fifo: v })}>fifo</Toggle>
+              )}
+              {el.broker === "kafka" && (
+                <NumField label="parts" value={el.partitions} onChange={(v) => onChange({ partitions: v })} />
+              )}
+              {(el.broker === "kafka" || el.broker === "gcp-pubsub") && (
+                <TextField label="group" value={el.consumerGroup} onChange={(v) => onChange({ consumerGroup: v })} />
+              )}
+              {(el.broker === "sqs" || el.broker === "rabbitmq") && (
+                <NumField label="vis(s)" value={el.visibilityTimeoutSec} onChange={(v) => onChange({ visibilityTimeoutSec: v })} />
+              )}
+              {el.broker === "sqs" && (
+                <NumField label="maxRx" value={el.maxReceives} onChange={(v) => onChange({ maxReceives: v })} />
+              )}
+              <NumField label="ret(h)" value={el.retentionHours} onChange={(v) => onChange({ retentionHours: v })} />
+              <div className="col-span-2 flex items-center gap-1">
+                <label className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">dlq</label>
+                <select
+                  value={el.dlqId ?? ""}
+                  onChange={(e) => onChange({ dlqId: e.target.value || undefined })}
+                  className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1"
+                >
+                  <option value="">— none —</option>
+                  {queues.filter((q) => q.id !== el.id).map((q) => (
+                    <option key={q.id} value={q.id}>{q.id} · {q.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+          {el.type === "topic" && (
+            <div className="grid grid-cols-2 gap-1">
+              {el.broker === "kafka" && (
+                <>
+                  <NumField label="parts" value={el.partitions} onChange={(v) => onChange({ partitions: v })} />
+                  <Toggle on={!!el.schemaContract} onChange={(v) => onChange({ schemaContract: v })}>schema</Toggle>
+                </>
+              )}
+              {(el.broker === "sns" || el.broker === "eventbridge") && (
+                <div className="col-span-2">
+                  <TextField label="filter" value={el.filterPolicy} onChange={(v) => onChange({ filterPolicy: v })} />
+                </div>
+              )}
+              <NumField label="ret(h)" value={el.retentionHours} onChange={(v) => onChange({ retentionHours: v })} />
+            </div>
+          )}
+        </div>
+      )}
       {el.type === "topic" && (
         <div className="space-y-2 pt-1 border-t border-border/60">
           <div className="flex items-center gap-2">
