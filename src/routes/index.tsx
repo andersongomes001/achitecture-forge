@@ -264,9 +264,11 @@ function ForgePage() {
               state={canvasState}
               onStateChange={setCanvasState}
               activeEdgeKeys={activeEdgeKeys}
+              managedEdges={managedEdges}
               onDropType={(type) => addElement(type)}
             />
           </Panel>
+
 
 
           <Panel
