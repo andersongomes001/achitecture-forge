@@ -34,6 +34,11 @@ const TYPE_META: Record<ElementType, { label: string; glyph: string; color: stri
   topic: { label: "Topic", glyph: "✦", color: "var(--color-accent)" },
   cache: { label: "Cache", glyph: "◷", color: "var(--color-success)" },
   external: { label: "External", glyph: "◯", color: "var(--color-muted-foreground)" },
+  "api-gateway": { label: "API Gateway", glyph: "⌥", color: "var(--color-primary)" },
+  lambda: { label: "Lambda / FaaS", glyph: "λ", color: "var(--color-accent)" },
+  scheduler: { label: "Scheduler", glyph: "⏱", color: "var(--color-info)" },
+  stream: { label: "Stream Processor", glyph: "⌇", color: "var(--color-warning)" },
+  saga: { label: "Saga Orchestrator", glyph: "⎈", color: "var(--color-success)" },
 };
 
 const DEFAULT_ELEMENTS: ArchElement[] = [
@@ -890,6 +895,11 @@ function buildArchDiagram(
     topic: (id, l) => `${id}{{"${l}"}}`,
     cache: (id, l) => `${id}[\\"${l}"\\]`,
     external: (id, l) => `${id}(("${l}"))`,
+    "api-gateway": (id, l) => `${id}>"${l}"]`,
+    lambda: (id, l) => `${id}(["${l}"])`,
+    scheduler: (id, l) => `${id}{{"${l}"}}`,
+    stream: (id, l) => `${id}[/"${l}"\\]`,
+    saga: (id, l) => `${id}(["${l}"])`,
   };
   for (const e of elements) {
     const tags = [
