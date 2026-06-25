@@ -449,14 +449,28 @@ function FaultBtn({
 
 function ElementCard({
   el,
+  queues,
   onChange,
   onRemove,
 }: {
   el: ArchElement;
+  queues: ArchElement[];
   onChange: (p: Partial<ArchElement>) => void;
   onRemove: () => void;
 }) {
   const meta = TYPE_META[el.type];
+  const bindings = el.bindings ?? [];
+  function setBinding(i: number, patch: Partial<TopicBinding>) {
+    const next = bindings.map((b, idx) => (idx === i ? { ...b, ...patch } : b));
+    onChange({ bindings: next });
+  }
+  function addBinding() {
+    const firstQueue = queues[0]?.id ?? "";
+    onChange({ bindings: [...bindings, { queueId: firstQueue, routingKey: "" }] });
+  }
+  function removeBinding(i: number) {
+    onChange({ bindings: bindings.filter((_, idx) => idx !== i) });
+  }
   return (
     <div className="rounded-md border border-border bg-surface-2/60 p-2.5 space-y-2">
       <div className="flex items-center gap-2">
@@ -508,6 +522,78 @@ function ElementCard({
           <Toggle on={!!el.hasInbox} onChange={(v) => onChange({ hasInbox: v })}>
             inbox
           </Toggle>
+        </div>
+      )}
+      {el.type === "topic" && (
+        <div className="space-y-2 pt-1 border-t border-border/60">
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              exchange
+            </label>
+            <select
+              value={el.topicKind ?? "fanout"}
+              onChange={(e) => onChange({ topicKind: e.target.value as TopicKind })}
+              className="text-[11px] bg-surface border border-border rounded px-1.5 py-0.5 flex-1 outline-none"
+            >
+              {(["fanout", "direct", "topic", "headers", "pubsub"] as TopicKind[]).map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                bindings ({bindings.length})
+              </span>
+              <button
+                onClick={addBinding}
+                disabled={queues.length === 0}
+                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-primary hover:border-primary/60 disabled:opacity-40"
+              >
+                + bind queue
+              </button>
+            </div>
+            {queues.length === 0 && bindings.length === 0 && (
+              <p className="text-[10px] text-muted-foreground italic">
+                add a queue component first to bind it here.
+              </p>
+            )}
+            {bindings.map((b, i) => (
+              <div key={i} className="flex items-center gap-1">
+                <select
+                  value={b.queueId}
+                  onChange={(e) => setBinding(i, { queueId: e.target.value })}
+                  className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0"
+                >
+                  {queues.map((q) => (
+                    <option key={q.id} value={q.id}>
+                      {q.id} · {q.name}
+                    </option>
+                  ))}
+                </select>
+                {(el.topicKind === "direct" ||
+                  el.topicKind === "topic" ||
+                  el.topicKind === "headers" ||
+                  el.topicKind == null) && (
+                  <input
+                    value={b.routingKey ?? ""}
+                    onChange={(e) => setBinding(i, { routingKey: e.target.value })}
+                    placeholder={el.topicKind === "topic" ? "order.*" : "key"}
+                    className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-24"
+                  />
+                )}
+                <button
+                  onClick={() => removeBinding(i)}
+                  className="text-muted-foreground hover:text-destructive text-[10px] px-1"
+                  aria-label="remove binding"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
