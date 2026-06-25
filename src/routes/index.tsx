@@ -185,6 +185,118 @@ const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   Q_SMS-)SMS: deliver
 `,
   },
+  snsSqs: {
+    elements: [
+      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"] },
+      { id: "DB", name: "Orders DB", type: "database" },
+      { id: "SNS", name: "orders-topic", type: "topic", topicKind: "fanout", broker: "sns",
+        bindings: [{ queueId: "Q_MAIL", filter: "eventType=OrderPlaced" }, { queueId: "Q_ANALYTICS" }] },
+      { id: "Q_MAIL", name: "mail-queue", type: "queue", broker: "sqs", hasInbox: true,
+        visibilityTimeoutSec: 30, maxReceives: 5, dlqId: "DLQ_MAIL", retentionHours: 96 },
+      { id: "DLQ_MAIL", name: "mail-dlq", type: "queue", broker: "sqs", retentionHours: 336 },
+      { id: "Q_ANALYTICS", name: "analytics-queue", type: "queue", broker: "sqs", fifo: true,
+        hasInbox: true, visibilityTimeoutSec: 60 },
+      { id: "MAIL", name: "Email Worker", type: "lambda", idempotent: true, hasInbox: true },
+      { id: "ANALY", name: "Analytics Worker", type: "service", idempotent: true, hasInbox: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant DB
+  participant SNS
+  participant Q_MAIL
+  participant Q_ANALYTICS
+  participant MAIL
+  participant ANALY
+
+  API->>DB: insert order + outbox row
+  Note over API: db write committed
+  API-)SNS: OrderPlaced
+  SNS-)Q_MAIL: OrderPlaced
+  SNS-)Q_ANALYTICS: OrderPlaced
+  Q_MAIL-)MAIL: deliver
+  Q_ANALYTICS-)ANALY: deliver
+`,
+  },
+  kafkaStream: {
+    elements: [
+      { id: "GW", name: "API Gateway", type: "api-gateway" },
+      { id: "API", name: "Ingest Svc", type: "service", hasOutbox: true, dataStores: ["DB"] },
+      { id: "DB", name: "Ingest DB", type: "database" },
+      { id: "KAFKA", name: "events", type: "topic", topicKind: "pubsub", broker: "kafka",
+        partitions: 12, schemaContract: true, bindings: [{ queueId: "CG_PROC" }, { queueId: "CG_AUDIT" }] },
+      { id: "CG_PROC", name: "processors-cg", type: "queue", broker: "kafka", consumerGroup: "processors", hasInbox: true },
+      { id: "CG_AUDIT", name: "audit-cg", type: "queue", broker: "kafka", consumerGroup: "audit", hasInbox: true },
+      { id: "STREAM", name: "Enrichment Stream", type: "stream", idempotent: true },
+      { id: "AUDIT", name: "Audit Sink", type: "service", idempotent: true, dataStores: ["WAREHOUSE"] },
+      { id: "WAREHOUSE", name: "Data Warehouse", type: "database" },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant GW
+  participant API
+  participant DB
+  participant KAFKA
+  participant CG_PROC
+  participant STREAM
+  participant CG_AUDIT
+  participant AUDIT
+
+  GW->>API: POST /events
+  API->>DB: persist
+  Note over API: db write committed
+  API-)KAFKA: event.raw
+  KAFKA-)CG_PROC: event.raw
+  CG_PROC-)STREAM: process
+  STREAM-)KAFKA: event.enriched
+  KAFKA-)CG_AUDIT: event.enriched
+  CG_AUDIT-)AUDIT: persist
+`,
+  },
+  sagaOrchestrator: {
+    elements: [
+      { id: "API", name: "Checkout API", type: "service" },
+      { id: "SAGA", name: "Checkout Saga", type: "saga", idempotent: true, dataStores: ["SDB"] },
+      { id: "SDB", name: "Saga State", type: "database" },
+      { id: "BUS", name: "commands", type: "topic", topicKind: "direct", broker: "rabbitmq",
+        bindings: [
+          { queueId: "Q_PAY", routingKey: "payment" },
+          { queueId: "Q_INV", routingKey: "inventory" },
+          { queueId: "Q_SHIP", routingKey: "shipping" },
+        ] },
+      { id: "Q_PAY", name: "payment.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
+      { id: "Q_INV", name: "inventory.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
+      { id: "Q_SHIP", name: "shipping.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
+      { id: "PAY", name: "Payment Svc", type: "service", idempotent: true },
+      { id: "INV", name: "Inventory Svc", type: "service", idempotent: true },
+      { id: "SHIP", name: "Shipping Svc", type: "service", idempotent: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant SAGA
+  participant BUS
+  participant Q_PAY
+  participant PAY
+  participant Q_INV
+  participant INV
+  participant Q_SHIP
+  participant SHIP
+
+  API->>SAGA: start checkout
+  SAGA-)BUS: payment.charge
+  BUS-)Q_PAY: payment.charge
+  Q_PAY-)PAY: charge
+  PAY-)SAGA: payment.ok
+  SAGA-)BUS: inventory.reserve
+  BUS-)Q_INV: inventory.reserve
+  Q_INV-)INV: reserve
+  INV-)SAGA: inventory.ok
+  SAGA-)BUS: shipping.dispatch
+  BUS-)Q_SHIP: shipping.dispatch
+  Q_SHIP-)SHIP: dispatch
+`,
+  },
 };
 
 function uid() {
