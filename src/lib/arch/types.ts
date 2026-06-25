@@ -6,6 +6,13 @@ export type ElementType =
   | "cache"
   | "external";
 
+export type TopicKind = "fanout" | "direct" | "topic" | "headers" | "pubsub";
+
+export interface TopicBinding {
+  queueId: string; // ArchElement.id of a queue
+  routingKey?: string;
+}
+
 export interface ArchElement {
   id: string; // short alias used in sequence diagram (e.g. "API")
   name: string;
@@ -13,6 +20,9 @@ export interface ArchElement {
   idempotent?: boolean;
   hasOutbox?: boolean;
   hasInbox?: boolean;
+  // topic-only
+  topicKind?: TopicKind;
+  bindings?: TopicBinding[];
 }
 
 export type StepKind = "sync" | "async" | "response" | "note";
