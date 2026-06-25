@@ -351,8 +351,9 @@ function DragPalette({ onAdd }: { onAdd: (t: ElementType) => void }) {
   );
 }
 
-
+function Panel({
   title,
+
   action,
   children,
 }: {
