@@ -149,11 +149,19 @@ function ArchNode({ data, selected }: NodeProps) {
 
 const nodeTypes: NodeTypes = { arch: ArchNode };
 
-const EDGE_STYLE: Record<CanvasEdgeData["kind"], { stroke: string; dasharray?: string }> = {
+const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?: number }> = {
   sync: { stroke: "var(--color-primary)" },
   async: { stroke: "var(--color-warning)", dasharray: "6 4" },
   response: { stroke: "var(--color-info)", dasharray: "2 3" },
+  fanout: { stroke: "var(--color-warning)", width: 2.4 },
+  direct: { stroke: "var(--color-primary)", width: 2 },
+  "topic-route": { stroke: "var(--color-accent)", dasharray: "8 3 2 3", width: 1.8 },
+  headers: { stroke: "var(--color-info)", dasharray: "1 4", width: 2 },
+  pubsub: { stroke: "var(--color-success)", dasharray: "10 3", width: 2.2 },
+  owns: { stroke: "var(--color-muted-foreground)", dasharray: "3 3", width: 1.2 },
 };
+
+const CYCLABLE: ReadonlySet<EdgeKind> = new Set(["sync", "async", "response"]);
 
 function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropType }: Props) {
   const positionsRef = useRef(state.positions);
