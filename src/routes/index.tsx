@@ -219,6 +219,7 @@ function ForgePage() {
                   key={el.id}
                   el={el}
                   queues={elements.filter((e) => e.type === "queue")}
+                  databases={elements.filter((e) => e.type === "database" || e.type === "cache")}
                   onChange={(p) => patchEl(el.id, p)}
                   onRemove={() => removeEl(el.id)}
                 />
