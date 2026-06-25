@@ -179,6 +179,27 @@ function ForgePage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <select
+              className="bg-surface-2 border border-border rounded-md px-2 py-1 text-xs"
+              value=""
+              onChange={(e) => {
+                const t = e.target.value as keyof typeof TEMPLATES;
+                if (t && TEMPLATES[t]) {
+                  setElements(TEMPLATES[t].elements);
+                  setSeqCode(TEMPLATES[t].seq);
+                  setCanvasState({ positions: {}, edges: [] });
+                  setFaults([]);
+                }
+                e.currentTarget.value = "";
+              }}
+              title="Load architecture pattern template"
+            >
+              <option value="">⌬ Templates…</option>
+              <option value="outbox">Transactional Outbox</option>
+              <option value="cqrs">CQRS + Read Model</option>
+              <option value="saga">Choreography Saga</option>
+              <option value="fanout">Fan-out Notifications</option>
+            </select>
             <Pill tone="info">{parsed.steps.length} steps</Pill>
             <Pill tone={result.summary.errors ? "error" : "success"}>
               {result.summary.errors} errors
