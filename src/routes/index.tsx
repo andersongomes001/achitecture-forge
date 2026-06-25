@@ -166,6 +166,7 @@ function ForgePage() {
                 <ElementCard
                   key={el.id}
                   el={el}
+                  queues={elements.filter((e) => e.type === "queue")}
                   onChange={(p) => patchEl(el.id, p)}
                   onRemove={() => removeEl(el.id)}
                 />
