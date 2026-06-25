@@ -1070,6 +1070,33 @@ function ElementCard({
   );
 }
 
+function NumField({ label, value, onChange }: { label: string; value?: number; onChange: (v: number | undefined) => void }) {
+  return (
+    <label className="flex items-center gap-1">
+      <span className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">{label}</span>
+      <input
+        type="number"
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
+        className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-full min-w-0"
+      />
+    </label>
+  );
+}
+
+function TextField({ label, value, onChange }: { label: string; value?: string; onChange: (v: string | undefined) => void }) {
+  return (
+    <label className="flex items-center gap-1">
+      <span className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">{label}</span>
+      <input
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-full min-w-0"
+      />
+    </label>
+  );
+}
+
 function Toggle({
   on,
   onChange,
