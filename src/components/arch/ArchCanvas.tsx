@@ -341,14 +341,16 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
         onEdgeClick={(_, edge) => {
-          // cycle edge kind on click
+          // managed edges (bindings) are not cyclable
+          const data = edge.data as CanvasEdgeData | undefined;
+          if (data?.managed || !CYCLABLE.has((data?.kind ?? "sync") as EdgeKind)) return;
           setEdges((curr) => {
             const next = curr.map((e) => {
               if (e.id !== edge.id) return e;
-              const kind = ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as CanvasEdgeData["kind"];
-              const nextKind: CanvasEdgeData["kind"] =
+              const kind = ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as EdgeKind;
+              const nextKind: EdgeKind =
                 kind === "sync" ? "async" : kind === "async" ? "response" : "sync";
-              return { ...e, data: { kind: nextKind } };
+              return { ...e, data: { ...(e.data ?? {}), kind: nextKind } };
             });
             emitState(nodes, next);
             return next;
