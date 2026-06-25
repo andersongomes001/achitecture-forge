@@ -505,11 +505,13 @@ function FaultBtn({
 function ElementCard({
   el,
   queues,
+  databases,
   onChange,
   onRemove,
 }: {
   el: ArchElement;
   queues: ArchElement[];
+  databases: ArchElement[];
   onChange: (p: Partial<ArchElement>) => void;
   onRemove: () => void;
 }) {
