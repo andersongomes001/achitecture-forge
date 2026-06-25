@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { MermaidView } from "@/components/arch/MermaidView";
-import { ArchCanvas, type CanvasState } from "@/components/arch/ArchCanvas";
+import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind } from "@/components/arch/ArchCanvas";
 import { parseSequence } from "@/lib/arch/parser";
 import { simulate } from "@/lib/arch/simulator";
 import type { ArchElement, ElementType, Fault, Severity, TopicKind, TopicBinding } from "@/lib/arch/types";
