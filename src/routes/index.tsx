@@ -325,7 +325,33 @@ function ForgePage() {
   );
 }
 
-function Panel({
+function DragPalette({ onAdd }: { onAdd: (t: ElementType) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 px-3 py-2 border-b border-border bg-surface-2/30">
+      {(Object.keys(TYPE_META) as ElementType[]).map((t) => {
+        const m = TYPE_META[t];
+        return (
+          <button
+            key={t}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("application/arch-type", t);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onClick={() => onAdd(t)}
+            className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border border-border bg-surface hover:border-primary/60 hover:text-primary cursor-grab active:cursor-grabbing"
+            title={`Drag onto canvas or click to add ${m.label}`}
+          >
+            <span className="mono" style={{ color: m.color }}>{m.glyph}</span>
+            {m.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+
   title,
   action,
   children,
