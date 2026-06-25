@@ -3,7 +3,7 @@ import { MermaidView } from "@/components/arch/MermaidView";
 import { ArchCanvas, type CanvasState } from "@/components/arch/ArchCanvas";
 import { parseSequence } from "@/lib/arch/parser";
 import { simulate } from "@/lib/arch/simulator";
-import type { ArchElement, ElementType, Fault, Severity } from "@/lib/arch/types";
+import type { ArchElement, ElementType, Fault, Severity, TopicKind, TopicBinding } from "@/lib/arch/types";
 import { createFileRoute } from "@tanstack/react-router";
 
 
