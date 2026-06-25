@@ -66,6 +66,7 @@ function ForgePage() {
   const [seqCode, setSeqCode] = useState(DEFAULT_SEQ);
   const [faults, setFaults] = useState<Fault[]>([]);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
+  const [canvasState, setCanvasState] = useState<CanvasState>({ positions: {}, edges: [] });
 
   const parsed = useMemo(() => parseSequence(seqCode), [seqCode]);
   const result = useMemo(
@@ -73,7 +74,14 @@ function ForgePage() {
     [elements, parsed.steps, faults],
   );
 
-  const archDiagram = useMemo(() => buildArchDiagram(elements, parsed.steps), [elements, parsed.steps]);
+  const activeEdgeKeys = useMemo(() => {
+    const set = new Set<string>();
+    if (currentStep == null) return set;
+    const s = parsed.steps[currentStep];
+    if (s?.from && s?.to) set.add(`${s.from}->${s.to}`);
+    return set;
+  }, [currentStep, parsed.steps]);
+
 
   function addElement(type: ElementType) {
     const id = uid();
