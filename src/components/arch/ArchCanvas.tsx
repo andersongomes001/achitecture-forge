@@ -65,12 +65,6 @@ function ArchNode({ data, selected }: NodeProps) {
     d.element.hasInbox && "inbox",
     d.element.idempotent && "idem",
   ].filter(Boolean) as string[];
-  return (
-    <div
-      className={`relative rounded-md border bg-surface px-3 py-2 min-w-[148px] shadow-sm transition-colors ${
-        selected ? "border-primary" : "border-border"
-      }`}
-    >
   const handleClass =
     "!w-3 !h-3 !bg-primary !border !border-background hover:!bg-accent transition-colors";
   const topicMeta =
