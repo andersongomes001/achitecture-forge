@@ -389,7 +389,11 @@ function ForgePage() {
   function addElement(type: ElementType) {
     const id = uid();
     const extra: Partial<ArchElement> =
-      type === "topic" ? { topicKind: "fanout", bindings: [] } : {};
+      type === "topic"
+        ? { topicKind: "fanout", bindings: [], broker: "generic" }
+        : type === "queue"
+          ? { broker: "generic" }
+          : {};
     setElements((es) => [
       ...es,
       { id, name: `${TYPE_META[type].label} ${id}`, type, hasInbox: false, hasOutbox: false, idempotent: false, ...extra },
