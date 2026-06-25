@@ -653,6 +653,59 @@ function ElementCard({
           </div>
         </div>
       )}
+      {el.type === "service" && (
+        <div className="space-y-1 pt-1 border-t border-border/60">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              data stores ({el.dataStores?.length ?? 0})
+            </span>
+            <button
+              onClick={() => {
+                const first = databases.find((d) => !el.dataStores?.includes(d.id));
+                if (!first) return;
+                onChange({ dataStores: [...(el.dataStores ?? []), first.id] });
+              }}
+              disabled={databases.length === 0 || (el.dataStores?.length ?? 0) >= databases.length}
+              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-info hover:border-info/60 disabled:opacity-40"
+            >
+              + bind store
+            </button>
+          </div>
+          {databases.length === 0 && (
+            <p className="text-[10px] text-muted-foreground italic">
+              add a database or cache to bind it.
+            </p>
+          )}
+          {(el.dataStores ?? []).map((dsId, i) => (
+            <div key={`${dsId}-${i}`} className="flex items-center gap-1">
+              <select
+                value={dsId}
+                onChange={(e) => {
+                  const next = [...(el.dataStores ?? [])];
+                  next[i] = e.target.value;
+                  onChange({ dataStores: next });
+                }}
+                className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0"
+              >
+                {databases.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.id} · {d.name} ({d.type})
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() =>
+                  onChange({ dataStores: (el.dataStores ?? []).filter((_, idx) => idx !== i) })
+                }
+                className="text-muted-foreground hover:text-destructive text-[10px] px-1"
+                aria-label="unbind"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
