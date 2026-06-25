@@ -33,7 +33,8 @@ export type EdgeKind =
   | "topic-route"
   | "headers"
   | "pubsub"
-  | "owns";
+  | "owns"
+  | "dlq";
 
 export interface CanvasEdgeData {
   kind: EdgeKind;
@@ -71,6 +72,11 @@ const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: str
   topic: { glyph: "✦", color: "var(--color-accent)", label: "Topic" },
   cache: { glyph: "◷", color: "var(--color-success)", label: "Cache" },
   external: { glyph: "◯", color: "var(--color-muted-foreground)", label: "External" },
+  "api-gateway": { glyph: "⌥", color: "var(--color-primary)", label: "API Gateway" },
+  lambda: { glyph: "λ", color: "var(--color-accent)", label: "Lambda" },
+  scheduler: { glyph: "⏱", color: "var(--color-info)", label: "Scheduler" },
+  stream: { glyph: "⌇", color: "var(--color-warning)", label: "Stream" },
+  saga: { glyph: "⎈", color: "var(--color-success)", label: "Saga Orchestrator" },
 };
 
 type ArchNodeData = {
@@ -159,6 +165,7 @@ const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?:
   headers: { stroke: "var(--color-info)", dasharray: "1 4", width: 2 },
   pubsub: { stroke: "var(--color-success)", dasharray: "10 3", width: 2.2 },
   owns: { stroke: "var(--color-muted-foreground)", dasharray: "3 3", width: 1.2 },
+  dlq: { stroke: "var(--color-destructive)", dasharray: "4 2", width: 1.6 },
 };
 
 const CYCLABLE: ReadonlySet<EdgeKind> = new Set(["sync", "async", "response"]);
