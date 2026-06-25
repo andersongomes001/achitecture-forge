@@ -57,6 +57,130 @@ const DEFAULT_SEQ = `sequenceDiagram
   WORKER->>WORKER: send confirmation email
 `;
 
+const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
+  outbox: {
+    elements: [
+      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"] },
+      { id: "DB", name: "Orders DB", type: "database" },
+      { id: "RELAY", name: "Outbox Relay", type: "service", idempotent: true },
+      { id: "BUS", name: "Events Bus", type: "topic", topicKind: "fanout", bindings: [{ queueId: "Q_MAIL" }] },
+      { id: "Q_MAIL", name: "Mail Queue", type: "queue", hasInbox: true },
+      { id: "MAIL", name: "Email Worker", type: "service", hasInbox: true, idempotent: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant DB
+  participant RELAY
+  participant BUS
+  participant Q_MAIL
+  participant MAIL
+
+  API->>DB: insert order + outbox row
+  Note over API: db write committed
+  RELAY->>DB: poll outbox
+  RELAY-)BUS: OrderPlaced
+  BUS-)Q_MAIL: OrderPlaced
+  Q_MAIL-)MAIL: OrderPlaced
+  MAIL->>MAIL: send email
+`,
+  },
+  cqrs: {
+    elements: [
+      { id: "API", name: "Write API", type: "service", dataStores: ["WDB"] },
+      { id: "WDB", name: "Write DB", type: "database" },
+      { id: "BUS", name: "Domain Events", type: "topic", topicKind: "pubsub", bindings: [{ queueId: "Q_PROJ" }] },
+      { id: "Q_PROJ", name: "Projector Queue", type: "queue", hasInbox: true },
+      { id: "PROJ", name: "Projector", type: "service", idempotent: true, dataStores: ["RDB"] },
+      { id: "RDB", name: "Read Model", type: "database" },
+      { id: "READ", name: "Query API", type: "service", dataStores: ["RDB"] },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant WDB
+  participant BUS
+  participant Q_PROJ
+  participant PROJ
+  participant RDB
+  participant READ
+
+  API->>WDB: persist command
+  API-)BUS: OrderChanged
+  BUS-)Q_PROJ: OrderChanged
+  Q_PROJ-)PROJ: OrderChanged
+  PROJ->>RDB: upsert read model
+  READ->>RDB: query
+`,
+  },
+  saga: {
+    elements: [
+      { id: "ORDER", name: "Order Svc", type: "service", hasOutbox: true, idempotent: true, dataStores: ["ODB"] },
+      { id: "ODB", name: "Order DB", type: "database" },
+      { id: "BUS", name: "Saga Bus", type: "topic", topicKind: "topic", bindings: [
+        { queueId: "Q_PAY", routingKey: "order.*" },
+        { queueId: "Q_INV", routingKey: "order.*" },
+      ] },
+      { id: "Q_PAY", name: "Payment Q", type: "queue", hasInbox: true },
+      { id: "Q_INV", name: "Inventory Q", type: "queue", hasInbox: true },
+      { id: "PAY", name: "Payment Svc", type: "service", idempotent: true },
+      { id: "INV", name: "Inventory Svc", type: "service", idempotent: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant ORDER
+  participant ODB
+  participant BUS
+  participant Q_PAY
+  participant PAY
+  participant Q_INV
+  participant INV
+
+  ORDER->>ODB: create order pending
+  ORDER-)BUS: order.created
+  BUS-)Q_PAY: order.created
+  BUS-)Q_INV: order.created
+  Q_PAY-)PAY: order.created
+  Q_INV-)INV: order.created
+  PAY-)BUS: order.paid
+  INV-)BUS: order.reserved
+`,
+  },
+  fanout: {
+    elements: [
+      { id: "API", name: "Publisher", type: "service" },
+      { id: "BUS", name: "Notify Topic", type: "topic", topicKind: "fanout", bindings: [
+        { queueId: "Q_PUSH" }, { queueId: "Q_MAIL" }, { queueId: "Q_SMS" },
+      ] },
+      { id: "Q_PUSH", name: "Push Queue", type: "queue", hasInbox: true },
+      { id: "Q_MAIL", name: "Mail Queue", type: "queue", hasInbox: true },
+      { id: "Q_SMS", name: "SMS Queue", type: "queue", hasInbox: true },
+      { id: "PUSH", name: "Push Worker", type: "service", idempotent: true },
+      { id: "MAIL", name: "Mail Worker", type: "service", idempotent: true },
+      { id: "SMS", name: "SMS Worker", type: "service", idempotent: true },
+    ],
+    seq: `sequenceDiagram
+  autonumber
+  participant API
+  participant BUS
+  participant Q_PUSH
+  participant Q_MAIL
+  participant Q_SMS
+  participant PUSH
+  participant MAIL
+  participant SMS
+
+  API-)BUS: UserSignedUp
+  BUS-)Q_PUSH: UserSignedUp
+  BUS-)Q_MAIL: UserSignedUp
+  BUS-)Q_SMS: UserSignedUp
+  Q_PUSH-)PUSH: deliver
+  Q_MAIL-)MAIL: deliver
+  Q_SMS-)SMS: deliver
+`,
+  },
+};
+
 function uid() {
   return Math.random().toString(36).slice(2, 7).toUpperCase();
 }
