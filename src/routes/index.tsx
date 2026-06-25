@@ -82,6 +82,58 @@ function ForgePage() {
     return set;
   }, [currentStep, parsed.steps]);
 
+  // Auto-generated edges from element configuration:
+  //  - topic bindings -> visual edge per exchange kind
+  //  - service.dataStores -> "owns" edge to each db/cache
+  const managedEdges = useMemo<ManagedEdge[]>(() => {
+    const out: ManagedEdge[] = [];
+    const elementIds = new Set(elements.map((e) => e.id));
+    for (const el of elements) {
+      if (el.type === "topic" && el.bindings?.length) {
+        const kindMap: Record<TopicKind, EdgeKind> = {
+          fanout: "fanout",
+          direct: "direct",
+          topic: "topic-route",
+          headers: "headers",
+          pubsub: "pubsub",
+        };
+        const tKind = el.topicKind ?? "fanout";
+        for (const b of el.bindings) {
+          if (!b.queueId || !elementIds.has(b.queueId)) continue;
+          const label =
+            tKind === "fanout"
+              ? "fanout"
+              : tKind === "pubsub"
+                ? "pub/sub"
+                : tKind === "headers"
+                  ? `hdr:${b.routingKey ?? ""}`
+                  : b.routingKey || tKind;
+          out.push({
+            id: `mng:bind:${el.id}->${b.queueId}:${b.routingKey ?? ""}`,
+            source: el.id,
+            target: b.queueId,
+            kind: kindMap[tKind],
+            label,
+          });
+        }
+      }
+      if (el.type === "service" && el.dataStores?.length) {
+        for (const dsId of el.dataStores) {
+          if (!elementIds.has(dsId)) continue;
+          out.push({
+            id: `mng:owns:${el.id}->${dsId}`,
+            source: el.id,
+            target: dsId,
+            kind: "owns",
+            label: "owns",
+          });
+        }
+      }
+    }
+    return out;
+  }, [elements]);
+
+
 
   function addElement(type: ElementType) {
     const id = uid();
