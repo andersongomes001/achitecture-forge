@@ -85,9 +85,11 @@ function ForgePage() {
 
   function addElement(type: ElementType) {
     const id = uid();
+    const extra: Partial<ArchElement> =
+      type === "topic" ? { topicKind: "fanout", bindings: [] } : {};
     setElements((es) => [
       ...es,
-      { id, name: `${TYPE_META[type].label} ${id}`, type, hasInbox: false, hasOutbox: false, idempotent: false },
+      { id, name: `${TYPE_META[type].label} ${id}`, type, hasInbox: false, hasOutbox: false, idempotent: false, ...extra },
     ]);
   }
   function patchEl(id: string, patch: Partial<ArchElement>) {
