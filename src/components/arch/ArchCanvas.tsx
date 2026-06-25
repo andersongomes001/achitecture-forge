@@ -163,7 +163,7 @@ const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?:
 
 const CYCLABLE: ReadonlySet<EdgeKind> = new Set(["sync", "async", "response"]);
 
-function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropType }: Props) {
+function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropType, managedEdges = [] }: Props) {
   const positionsRef = useRef(state.positions);
   positionsRef.current = state.positions;
 
