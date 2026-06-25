@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { MermaidView } from "@/components/arch/MermaidView";
+import { ArchCanvas, type CanvasState } from "@/components/arch/ArchCanvas";
 import { parseSequence } from "@/lib/arch/parser";
 import { simulate } from "@/lib/arch/simulator";
 import type { ArchElement, ElementType, Fault, Severity } from "@/lib/arch/types";
 import { createFileRoute } from "@tanstack/react-router";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -64,6 +66,7 @@ function ForgePage() {
   const [seqCode, setSeqCode] = useState(DEFAULT_SEQ);
   const [faults, setFaults] = useState<Fault[]>([]);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
+  const [canvasState, setCanvasState] = useState<CanvasState>({ positions: {}, edges: [] });
 
   const parsed = useMemo(() => parseSequence(seqCode), [seqCode]);
   const result = useMemo(
@@ -71,7 +74,14 @@ function ForgePage() {
     [elements, parsed.steps, faults],
   );
 
-  const archDiagram = useMemo(() => buildArchDiagram(elements, parsed.steps), [elements, parsed.steps]);
+  const activeEdgeKeys = useMemo(() => {
+    const set = new Set<string>();
+    if (currentStep == null) return set;
+    const s = parsed.steps[currentStep];
+    if (s?.from && s?.to) set.add(`${s.from}->${s.to}`);
+    return set;
+  }, [currentStep, parsed.steps]);
+
 
   function addElement(type: ElementType) {
     const id = uid();
@@ -182,13 +192,26 @@ function ForgePage() {
           </Panel>
         </section>
 
-        {/* Center: architecture + sequence */}
+        {/* Center: architecture canvas + sequence */}
         <section className="col-span-12 lg:col-span-6 space-y-4">
-          <Panel title="Architecture map">
-            <div className="p-3">
-              <MermaidView code={archDiagram} />
-            </div>
+          <Panel
+            title="Architecture canvas"
+            action={
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                drag to add · drag handles to connect · click line to change type
+              </span>
+            }
+          >
+            <DragPalette onAdd={(t) => addElement(t)} />
+            <ArchCanvas
+              elements={elements}
+              state={canvasState}
+              onStateChange={setCanvasState}
+              activeEdgeKeys={activeEdgeKeys}
+              onDropType={(type) => addElement(type)}
+            />
           </Panel>
+
 
           <Panel
             title="Sequence diagram"
@@ -302,8 +325,35 @@ function ForgePage() {
   );
 }
 
+function DragPalette({ onAdd }: { onAdd: (t: ElementType) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 px-3 py-2 border-b border-border bg-surface-2/30">
+      {(Object.keys(TYPE_META) as ElementType[]).map((t) => {
+        const m = TYPE_META[t];
+        return (
+          <button
+            key={t}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("application/arch-type", t);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onClick={() => onAdd(t)}
+            className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border border-border bg-surface hover:border-primary/60 hover:text-primary cursor-grab active:cursor-grabbing"
+            title={`Drag onto canvas or click to add ${m.label}`}
+          >
+            <span className="mono" style={{ color: m.color }}>{m.glyph}</span>
+            {m.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Panel({
   title,
+
   action,
   children,
 }: {
