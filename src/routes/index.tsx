@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import { MermaidView } from "@/components/arch/MermaidView";
 import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind } from "@/components/arch/ArchCanvas";
 import { parseSequence } from "@/lib/arch/parser";
+import { importFromMermaid } from "@/lib/arch/import";
 import { simulate } from "@/lib/arch/simulator";
-import type { ArchElement, ElementType, Fault, Severity, TopicKind, TopicBinding } from "@/lib/arch/types";
+import type { ArchElement, BrokerKind, ElementType, Fault, Severity, TopicKind, TopicBinding } from "@/lib/arch/types";
 import { createFileRoute } from "@tanstack/react-router";
 
 
@@ -257,6 +258,15 @@ function ForgePage() {
             label: "owns",
           });
         }
+      }
+      if (el.type === "queue" && el.dlqId && elementIds.has(el.dlqId)) {
+        out.push({
+          id: `mng:dlq:${el.id}->${el.dlqId}`,
+          source: el.id,
+          target: el.dlqId,
+          kind: "dlq",
+          label: `DLQ${el.maxReceives ? ` · max ${el.maxReceives}` : ""}`,
+        });
       }
     }
     return out;
