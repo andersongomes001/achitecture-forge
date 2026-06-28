@@ -609,7 +609,10 @@ function ForgePage() {
                 ⚠ Findings · {result.events.length}
               </DrawerTab>
               <DrawerTab active={drawerTab === "sequence"} onClick={() => { setDrawerTab("sequence"); setDrawerOpen(true); }}>
-                ⌥ Sequence
+                ⌥ Sequences · {scenarios.length}
+              </DrawerTab>
+              <DrawerTab active={drawerTab === "load"} onClick={() => { setDrawerTab("load"); setDrawerOpen(true); }}>
+                ⚡ Load{load.errors + load.warnings ? ` · ${load.errors + load.warnings}` : ""}
               </DrawerTab>
               <div className="flex-1" />
               <button onClick={() => setDrawerOpen((v) => !v)}
