@@ -515,9 +515,22 @@ function ForgePage() {
           ⇪ Import Mermaid
         </button>
 
+        <button
+          onClick={generateFromCanvas}
+          title="Generate a Mermaid sequence diagram from the components & connections on the canvas"
+          className="text-xs px-2 py-1 rounded-md border border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
+        >
+          ⤓ Generate from canvas
+        </button>
+
         <button onClick={exportJson}
           className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
           ↧ Export JSON
+        </button>
+
+        <button onClick={() => setShowGuide(true)}
+          className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
+          ? Guide
         </button>
 
         <div className="flex-1" />
@@ -525,6 +538,17 @@ function ForgePage() {
         <Pill tone="info">{parsed.steps.length} steps</Pill>
         <Pill tone={result.summary.errors ? "error" : "success"}>{result.summary.errors} errors</Pill>
         <Pill tone={result.summary.warnings ? "warning" : "muted"}>{result.summary.warnings} warnings</Pill>
+        <Pill tone={load.errors ? "error" : load.warnings ? "warning" : "muted"}>
+          {load.errors + load.warnings} load
+        </Pill>
+
+        <button
+          onClick={() => setShowLegend((v) => !v)}
+          className="ml-2 text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary"
+        >
+          {showLegend ? "Hide legend" : "Legend"}
+        </button>
+
 
         <button
           onClick={() => setShowInspector((v) => !v)}
