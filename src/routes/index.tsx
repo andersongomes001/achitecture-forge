@@ -777,7 +777,7 @@ function LoadView({ load, onPatch }: { load: LoadResult; onPatch: (id: string, p
       </div>
     );
   }
-  const tone: Record<LoadRow["status"], string> = {
+  const tone: Record<LoadStatus, string> = {
     over: "text-destructive",
     warn: "text-amber-400",
     ok: "text-green-400",
