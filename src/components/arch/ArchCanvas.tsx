@@ -406,6 +406,31 @@ function InnerCanvas({
     })),
   );
 
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+
+  const updateOffset = useCallback(
+    (edgeId: string, offset: { x: number; y: number }) => {
+      const next = { ...offsetsRef.current, [edgeId]: offset };
+      offsetsRef.current = next;
+      const positions: Record<string, XYPosition> = {};
+      for (const n of nodesRef.current) positions[n.id] = n.position;
+      onStateChange({
+        positions,
+        edges: edgesRef.current.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          kind: ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as EdgeKind,
+        })),
+        edgeOffsets: next,
+      });
+    },
+    [onStateChange],
+  );
+
   // map id → position for handle picking
   const nodePos = useMemo(() => {
     const m = new Map<string, XYPosition>();
