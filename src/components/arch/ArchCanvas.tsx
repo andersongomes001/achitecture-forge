@@ -625,7 +625,7 @@ function InnerCanvas({
         snapGrid={[16, 16]}
         connectionMode={ConnectionMode.Loose}
         proOptions={{ hideAttribution: true }}
-        defaultEdgeOptions={{ animated: true, type: "smoothstep" }}
+        defaultEdgeOptions={{ animated: true, type: "editable" }}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-grid)" />
         <Controls className="!bg-surface !border !border-border" />
