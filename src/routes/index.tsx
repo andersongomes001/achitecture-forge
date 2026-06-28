@@ -701,9 +701,16 @@ function ForgePage() {
 
 /* ------- subcomponents ------- */
 
-function Palette({ onAdd }: { onAdd: (t: ElementType) => void }) {
+function Palette({ onAdd, expanded, onToggle }: { onAdd: (t: ElementType) => void; expanded: boolean; onToggle: () => void }) {
   return (
-    <aside className="w-16 shrink-0 border-r border-border bg-surface/70 backdrop-blur flex flex-col items-center py-2 gap-1.5 overflow-y-auto">
+    <aside className={`${expanded ? "w-44" : "w-16"} shrink-0 border-r border-border bg-surface/70 backdrop-blur flex flex-col py-2 gap-1.5 overflow-y-auto transition-all`}>
+      <button
+        onClick={onToggle}
+        title={expanded ? "Collapse palette" : "Expand palette"}
+        className={`mx-2 mb-1 h-7 rounded-md border border-border bg-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary/40 flex items-center ${expanded ? "justify-between px-2" : "justify-center"}`}
+      >
+        {expanded ? <><span>Components</span><span>‹</span></> : <span>›</span>}
+      </button>
       {(Object.keys(TYPE_GLYPH) as ElementType[])
         .filter((t) => t !== "relay" && t !== "inbox-store")
         .map((t) => {
@@ -718,18 +725,113 @@ function Palette({ onAdd }: { onAdd: (t: ElementType) => void }) {
               }}
               onClick={() => onAdd(t)}
               title={`Drag onto canvas or click to add ${m.label}`}
-              className="w-12 h-12 grid place-items-center rounded-md border border-border bg-surface hover:border-primary/60 hover:text-primary cursor-grab active:cursor-grabbing transition group relative"
+              className={`mx-2 h-11 rounded-md border border-border bg-surface hover:border-primary/60 hover:text-primary cursor-grab active:cursor-grabbing transition group relative flex items-center ${expanded ? "gap-2 px-3" : "justify-center"}`}
             >
-              <span className="mono text-xl" style={{ color: m.color }}>{m.glyph}</span>
-              <span className="absolute left-full ml-2 text-[10px] uppercase tracking-wider bg-surface border border-border rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-30">
-                {m.label}
-              </span>
+              <span className="mono text-xl shrink-0" style={{ color: m.color }}>{m.glyph}</span>
+              {expanded ? (
+                <span className="text-[11px] truncate">{m.label}</span>
+              ) : (
+                <span className="absolute left-full ml-2 text-[10px] uppercase tracking-wider bg-surface border border-border rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-30">
+                  {m.label}
+                </span>
+              )}
             </button>
           );
         })}
     </aside>
   );
 }
+
+const EDGE_LEGEND: { label: string; color: string; dashed?: boolean; thick?: boolean }[] = [
+  { label: "Sync call (request/response)", color: "var(--primary)" },
+  { label: "Async message", color: "var(--accent)", dashed: true },
+  { label: "Owns / data store", color: "#22c55e" },
+  { label: "Publish (outbox/relay)", color: "#f59e0b", thick: true },
+  { label: "Fan-out / pub-sub", color: "#a855f7", thick: true },
+  { label: "DLQ / dead-letter", color: "#ef4444", dashed: true },
+  { label: "Bind (topic → queue)", color: "#38bdf8" },
+];
+
+function Legend() {
+  return (
+    <div className="absolute bottom-3 left-3 z-10 bg-surface/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-lg max-w-[220px]">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">Line legend</div>
+      <ul className="space-y-1">
+        {EDGE_LEGEND.map((l) => (
+          <li key={l.label} className="flex items-center gap-2">
+            <svg width="26" height="8" className="shrink-0">
+              <line x1="0" y1="4" x2="26" y2="4"
+                stroke={l.color}
+                strokeWidth={l.thick ? 3 : 1.6}
+                strokeDasharray={l.dashed ? "4 3" : undefined} />
+            </svg>
+            <span className="text-[10px] text-muted-foreground">{l.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function LoadView({ load, onPatch }: { load: LoadResult; onPatch: (id: string, p: Partial<ArchElement>) => void }) {
+  if (load.rows.length === 0) {
+    return (
+      <div className="p-4 text-xs text-muted-foreground leading-relaxed">
+        No load configured yet. Select a service / API / queue / topic and set its{" "}
+        <span className="text-foreground">offered RPS</span> and{" "}
+        <span className="text-foreground">capacity per instance</span> (or consumer drain rate for
+        queues) below or in the inspector to validate capacity & backlog.
+      </div>
+    );
+  }
+  const tone: Record<LoadRow["status"], string> = {
+    over: "text-destructive",
+    warn: "text-amber-400",
+    ok: "text-green-400",
+    na: "text-muted-foreground",
+  };
+  return (
+    <table className="w-full text-[11px]">
+      <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-surface-2/40 sticky top-0">
+        <tr>
+          <th className="text-left px-3 py-1.5">Component</th>
+          <th className="text-right px-2">Offered</th>
+          <th className="text-right px-2">Capacity</th>
+          <th className="text-left px-2 w-28">Utilization</th>
+          <th className="text-left px-3">Diagnosis</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-border">
+        {load.rows.map((r) => {
+          const pct = r.utilization != null ? Math.round(r.utilization * 100) : null;
+          return (
+            <tr key={r.id}>
+              <td className="px-3 py-1.5">
+                <span className="text-foreground">{r.name}</span>
+                <span className="text-muted-foreground ml-1">· {r.type}</span>
+              </td>
+              <td className="text-right px-2 mono">{r.offered != null ? fmtRate(r.offered) : "—"}</td>
+              <td className="text-right px-2 mono">{r.capacity != null ? fmtRate(r.capacity) : "—"}</td>
+              <td className="px-2">
+                {pct != null ? (
+                  <div className="flex items-center gap-1">
+                    <div className="flex-1 h-1.5 rounded bg-surface-2 overflow-hidden">
+                      <div className={`h-full ${r.status === "over" ? "bg-destructive" : r.status === "warn" ? "bg-amber-400" : "bg-green-500"}`}
+                        style={{ width: `${Math.min(100, pct)}%` }} />
+                    </div>
+                    <span className={`mono ${tone[r.status]}`}>{pct}%</span>
+                  </div>
+                ) : <span className="text-muted-foreground">—</span>}
+              </td>
+              <td className={`px-3 py-1.5 ${tone[r.status]}`}>{r.note ?? "—"}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 
 function DrawerTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
