@@ -795,7 +795,7 @@ function LoadView({ load, onPatch }: { load: LoadResult; onPatch: (id: string, p
         </tr>
       </thead>
       <tbody className="divide-y divide-border">
-        {load.rows.map((r) => {
+        {load.rows.map((r: LoadRow) => {
           const pct = r.utilization != null ? Math.round(r.utilization * 100) : null;
           return (
             <tr key={r.id}>
