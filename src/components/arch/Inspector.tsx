@@ -84,10 +84,9 @@ export function Inspector(props: Props) {
             />
           </Row>
           <Row label="id">
-            <input
+            <IdField
               value={element.id}
-              onChange={(e) => props.onChange({ id: e.target.value.replace(/\s+/g, "_").toUpperCase() })}
-              className="mono text-[11px] bg-surface border border-border rounded px-2 py-1 outline-none flex-1"
+              onCommit={(v) => props.onChange({ id: v })}
             />
           </Row>
           <Row label="type">
@@ -646,6 +645,37 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <label className="text-[10px] uppercase tracking-wider text-muted-foreground w-20 shrink-0">{label}</label>
       <div className="flex-1 flex items-center gap-1 min-w-0">{children}</div>
     </div>
+  );
+}
+
+function IdField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const shown = editing ? draft : value;
+  const commit = () => {
+    setEditing(false);
+    const next = draft.replace(/\s+/g, "_").toUpperCase();
+    if (next && next !== value) onCommit(next);
+  };
+  return (
+    <input
+      value={shown}
+      onFocus={() => {
+        setDraft(value);
+        setEditing(true);
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") {
+          setDraft(value);
+          setEditing(false);
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      className="mono text-[11px] bg-surface border border-border rounded px-2 py-1 outline-none flex-1"
+    />
   );
 }
 
