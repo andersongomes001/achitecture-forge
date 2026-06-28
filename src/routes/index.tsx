@@ -742,32 +742,25 @@ function Palette({ onAdd, expanded, onToggle }: { onAdd: (t: ElementType) => voi
   );
 }
 
-const EDGE_LEGEND: { label: string; color: string; dashed?: boolean; thick?: boolean }[] = [
-  { label: "Sync call (request/response)", color: "var(--primary)" },
-  { label: "Async message", color: "var(--accent)", dashed: true },
-  { label: "Owns / data store", color: "#22c55e" },
-  { label: "Publish (outbox/relay)", color: "#f59e0b", thick: true },
-  { label: "Fan-out / pub-sub", color: "#a855f7", thick: true },
-  { label: "DLQ / dead-letter", color: "#ef4444", dashed: true },
-  { label: "Bind (topic → queue)", color: "#38bdf8" },
-];
-
 function Legend() {
   return (
-    <div className="absolute bottom-3 left-3 z-10 bg-surface/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-lg max-w-[220px]">
+    <div className="absolute bottom-3 left-3 z-10 bg-surface/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-lg max-h-[60%] overflow-auto w-[210px]">
       <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">Line legend</div>
       <ul className="space-y-1">
-        {EDGE_LEGEND.map((l) => (
-          <li key={l.label} className="flex items-center gap-2">
-            <svg width="26" height="8" className="shrink-0">
-              <line x1="0" y1="4" x2="26" y2="4"
-                stroke={l.color}
-                strokeWidth={l.thick ? 3 : 1.6}
-                strokeDasharray={l.dashed ? "4 3" : undefined} />
-            </svg>
-            <span className="text-[10px] text-muted-foreground">{l.label}</span>
-          </li>
-        ))}
+        {EDGE_LEGEND.map((l) => {
+          const st = EDGE_STYLE[l.kind];
+          return (
+            <li key={l.kind} className="flex items-center gap-2">
+              <svg width="26" height="8" className="shrink-0">
+                <line x1="0" y1="4" x2="26" y2="4"
+                  stroke={st?.stroke ?? "var(--color-primary)"}
+                  strokeWidth={st?.width ?? 1.6}
+                  strokeDasharray={st?.dasharray} />
+              </svg>
+              <span className="text-[10px] text-muted-foreground">{l.label}</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
