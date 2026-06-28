@@ -265,9 +265,30 @@ function ForgePage() {
         if (firstDb && ids.has(firstDb)) {
           out.push({ id: `mng:relayread:${el.id}->${firstDb}`, source: el.id, target: firstDb, kind: "relay-read", label: "poll outbox" });
         }
+        // relay publishes to the configured destination (topic / queue / broker)
+        if (svc?.outboxTargetId && ids.has(svc.outboxTargetId)) {
+          out.push({ id: `mng:relaypub:${el.id}->${svc.outboxTargetId}`, source: el.id, target: svc.outboxTargetId, kind: "relay-publish", label: "publish" });
+        }
       }
       if (el.type === "inbox-store" && el.isInboxFor && ids.has(el.isInboxFor)) {
         out.push({ id: `mng:inbox:${el.isInboxFor}->${el.id}`, source: el.isInboxFor, target: el.id, kind: "inbox-of", label: "dedup" });
+        const svc = elements.find((e) => e.id === el.isInboxFor);
+        // messages consumed from the configured source flow into the inbox store
+        if (svc?.inboxSourceId && ids.has(svc.inboxSourceId)) {
+          out.push({ id: `mng:consume:${svc.inboxSourceId}->${el.id}`, source: svc.inboxSourceId, target: el.id, kind: "consume", label: "consume" });
+        }
+        // inbox dedup table lives in a database (often the same as the outbox DB)
+        if (svc?.inboxDbId && ids.has(svc.inboxDbId)) {
+          out.push({ id: `mng:inboxtbl:${el.id}->${svc.inboxDbId}`, source: el.id, target: svc.inboxDbId, kind: "inbox-table", label: "dedup table" });
+        }
+      }
+      // broker element contains its topics / queues
+      if (el.type === "broker") {
+        for (const child of elements) {
+          if (child.brokerId === el.id && (child.type === "topic" || child.type === "queue")) {
+            out.push({ id: `mng:broker:${el.id}->${child.id}`, source: el.id, target: child.id, kind: "broker-of", label: "hosts" });
+          }
+        }
       }
       if (el.type === "database" && el.isReplicaOf && ids.has(el.isReplicaOf)) {
         out.push({ id: `mng:replica:${el.isReplicaOf}->${el.id}`, source: el.isReplicaOf, target: el.id, kind: "replica", label: "replica" });
