@@ -10,6 +10,7 @@ export type ElementType =
   | "scheduler"
   | "stream"
   | "saga"
+  | "broker"
   | "relay"
   | "inbox-store";
 
