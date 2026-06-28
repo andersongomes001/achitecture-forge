@@ -63,6 +63,12 @@ export interface ArchElement {
   /** auto-derived relay/inbox attachments live as separate elements; these point back. */
   outboxRelayId?: string;
   inboxStoreId?: string;
+  /** outbox: where the relay publishes (topic / queue / broker element id). */
+  outboxTargetId?: string;
+  /** inbox: where messages are consumed from (topic / queue / broker element id). */
+  inboxSourceId?: string;
+  /** inbox: database hosting the dedup table — typically the same DB bound to the outbox. */
+  inboxDbId?: string;
 
   // broker-specific (queue or topic)
   broker?: BrokerKind;
