@@ -48,6 +48,14 @@ export function Inspector(props: Props) {
   const meta = TYPE_GLYPH[element.type];
   const queues = elements.filter((e) => e.type === "queue" && e.id !== element.id);
   const dbs = elements.filter((e) => e.type === "database" || e.type === "cache");
+  // messaging destinations the outbox can publish to / the inbox can consume from
+  const destinations = elements.filter(
+    (e) => (e.type === "topic" || e.type === "queue" || e.type === "broker") && e.id !== element.id,
+  );
+  // databases owned by this service (preferred host for the inbox dedup table)
+  const ownedDbs = (element.dataStores ?? [])
+    .map((id) => elements.find((e) => e.id === id))
+    .filter((e): e is ArchElement => !!e && (e.type === "database" || e.type === "cache"));
 
   return (
     <Shell
