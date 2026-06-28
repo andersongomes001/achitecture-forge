@@ -695,6 +695,7 @@ function ForgePage() {
           />
         )}
       </div>
+      {showGuide && <GuideModal onClose={() => setShowGuide(false)} />}
     </div>
   );
 }
