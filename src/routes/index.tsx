@@ -766,7 +766,7 @@ function Legend() {
   );
 }
 
-function LoadView({ load, onPatch }: { load: LoadResult; onPatch: (id: string, p: Partial<ArchElement>) => void }) {
+function LoadView({ load }: { load: LoadResult }) {
   if (load.rows.length === 0) {
     return (
       <div className="p-4 text-xs text-muted-foreground leading-relaxed">
