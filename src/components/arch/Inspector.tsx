@@ -768,6 +768,35 @@ function BindingsEditor({
   );
 }
 
+function TargetListEditor({
+  ids, options, addLabel, onChange,
+}: { ids: string[]; options: ArchElement[]; addLabel: string; onChange: (ids: string[]) => void }) {
+  return (
+    <div className="space-y-1">
+      <button onClick={() => {
+        const first = options.find((d) => !ids.includes(d.id));
+        if (first) onChange([...ids, first.id]);
+      }}
+        disabled={options.length === 0 || ids.length >= options.length}
+        className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border hover:text-info hover:border-info/60 disabled:opacity-40">
+        {addLabel}
+      </button>
+      {ids.map((id, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <select value={id} onChange={(e) => {
+            const next = [...ids]; next[i] = e.target.value; onChange(next);
+          }}
+            className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0">
+            {options.map((d) => <option key={d.id} value={d.id}>{d.id} · {d.type}</option>)}
+          </select>
+          <button onClick={() => onChange(ids.filter((_, idx) => idx !== i))}
+            className="text-muted-foreground hover:text-destructive text-[10px] px-1">✕</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DataStoresEditor({
   el, dbs, onChange,
 }: { el: ArchElement; dbs: ArchElement[]; onChange: (ids: string[]) => void }) {
