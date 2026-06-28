@@ -637,12 +637,40 @@ function ForgePage() {
                   <FindingsView events={result.events} onApply={applyRemediation} onHover={setCurrentStep} currentStep={currentStep} />
                 )}
                 {drawerTab === "sequence" && (
-                  <textarea
-                    className="mono w-full h-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
-                    value={seqCode}
-                    spellCheck={false}
-                    onChange={(e) => setSeqCode(e.target.value)}
-                  />
+                  <div className="flex flex-col h-full">
+                    <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-surface-2/40 overflow-x-auto shrink-0">
+                      {scenarios.map((s) => (
+                        <div key={s.id}
+                          className={`group flex items-center gap-1 px-2 py-1 rounded text-[11px] cursor-pointer whitespace-nowrap ${s.id === activeScenario ? "bg-primary/20 text-primary" : "bg-surface-2 text-muted-foreground hover:text-foreground"}`}
+                          onClick={() => { setActiveScenario(s.id); setCurrentStep(null); setPlaying(false); }}
+                        >
+                          <input
+                            value={s.name}
+                            onChange={(e) => renameScenario(s.id, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-transparent outline-none w-24 cursor-text"
+                          />
+                          {scenarios.length > 1 && (
+                            <button onClick={(e) => { e.stopPropagation(); removeScenario(s.id); }}
+                              className="opacity-0 group-hover:opacity-100 text-destructive">×</button>
+                          )}
+                        </div>
+                      ))}
+                      <button onClick={addScenario}
+                        className="px-2 py-1 rounded text-[11px] border border-border text-muted-foreground hover:text-primary hover:border-primary/40">
+                        + new
+                      </button>
+                    </div>
+                    <textarea
+                      className="mono flex-1 w-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
+                      value={seqCode}
+                      spellCheck={false}
+                      onChange={(e) => setSeqCode(e.target.value)}
+                    />
+                  </div>
+                )}
+                {drawerTab === "load" && (
+                  <LoadView load={load} elements={elements} onPatch={patchElement} />
                 )}
               </div>
             )}
