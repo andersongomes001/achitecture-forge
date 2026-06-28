@@ -421,6 +421,38 @@ function ForgePage() {
     URL.revokeObjectURL(a.href);
   }
 
+  // ----- scenarios (multiple sequence diagrams) -----
+  function addScenario() {
+    const id = `s${uid()}`;
+    setScenarios((prev) => [...prev, { id, name: `Scenario ${prev.length + 1}`, seq: "sequenceDiagram\n  autonumber\n" }]);
+    setActiveScenario(id);
+    setCurrentStep(null);
+    setPlaying(false);
+  }
+  function removeScenario(id: string) {
+    setScenarios((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((s) => s.id !== id);
+      if (id === activeScenario) setActiveScenario(next[0].id);
+      return next;
+    });
+  }
+  function renameScenario(id: string, name: string) {
+    setScenarios((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
+  }
+
+  // generate a mermaid sequence diagram from the current canvas
+  function generateFromCanvas() {
+    const seq = generateMermaid(elements, canvasState.edges, managedEdges);
+    const id = `s${uid()}`;
+    setScenarios((prev) => [...prev, { id, name: `From canvas ${prev.length + 1}`, seq }]);
+    setActiveScenario(id);
+    setDrawerTab("sequence");
+    setDrawerOpen(true);
+    setCurrentStep(null);
+    setPlaying(false);
+  }
+
   const selected = elements.find((e) => e.id === selectedId) ?? null;
   const stepEvents = useMemo(() => {
     const map = new Map<number, typeof result.events>();
