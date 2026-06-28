@@ -48,7 +48,9 @@ export type EdgeKind =
   | "consume"
   | "broker-of"
   | "inbox-table"
-  | "inbox-of";
+  | "inbox-of"
+  | "publish"
+  | "subscribe";
 
 export interface CanvasEdgeData {
   kind: EdgeKind;
@@ -254,6 +256,8 @@ const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?:
   "broker-of": { stroke: "var(--color-accent)", dasharray: "1 3", width: 1 },
   "inbox-table": { stroke: "var(--color-success)", dasharray: "3 3", width: 1.2 },
   "inbox-of": { stroke: "var(--color-success)", dasharray: "2 4", width: 1.2 },
+  publish: { stroke: "var(--color-accent)", width: 1.8 },
+  subscribe: { stroke: "var(--color-success)", width: 1.8 },
 };
 
 const CYCLABLE: ReadonlySet<EdgeKind> = new Set(["sync", "async", "response"]);
@@ -671,4 +675,6 @@ export const EDGE_LEGEND: { kind: EdgeKind; label: string }[] = [
   { kind: "retry", label: "Retry queue" },
   { kind: "replica", label: "DB replica" },
   { kind: "broker-of", label: "Broker hosts" },
+  { kind: "publish", label: "Direct publish (stateless)" },
+  { kind: "subscribe", label: "Direct consume (stateless)" },
 ];
