@@ -529,6 +529,36 @@ export function Inspector(props: Props) {
             </Section>
           )}
 
+          {(element.type === "service" || element.type === "lambda" || element.type === "saga" || element.type === "stream") && (
+            <Section title="Direct messaging (stateless)">
+              <p className="text-[9.5px] text-muted-foreground">
+                For services without outbox/inbox: publish to and consume directly from topics, queues or brokers.
+              </p>
+              <div className="space-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-accent">publishes to</span>
+                <TargetListEditor
+                  ids={element.publishesTo ?? []}
+                  options={destinations}
+                  addLabel="+ publisher"
+                  onChange={(ids) => props.onChange({ publishesTo: ids })}
+                />
+              </div>
+              <div className="space-y-1 pt-1">
+                <span className="text-[10px] uppercase tracking-wider text-success">consumes from</span>
+                <TargetListEditor
+                  ids={element.consumesFrom ?? []}
+                  options={destinations}
+                  addLabel="+ consumer"
+                  onChange={(ids) => props.onChange({ consumesFrom: ids })}
+                />
+                {(element.consumesFrom?.length ?? 0) > 0 && !element.idempotent && !element.hasInbox && (
+                  <p className="text-[9.5px] text-warning">Consuming without idempotency/inbox — duplicate deliveries may double-process.</p>
+                )}
+              </div>
+            </Section>
+          )}
+
+
           <Section title="Contract">
             <Row label="contract">
               <select
