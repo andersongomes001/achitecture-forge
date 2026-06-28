@@ -178,15 +178,31 @@ function uid() {
 
 function ForgePage() {
   const [elements, setElementsRaw] = useState<ArchElement[]>(DEFAULT_ELEMENTS);
-  const [seqCode, setSeqCode] = useState(DEFAULT_SEQ);
+  const [scenarios, setScenarios] = useState<Scenario[]>([
+    { id: "s1", name: "Main flow", seq: DEFAULT_SEQ },
+  ]);
+  const [activeScenario, setActiveScenario] = useState("s1");
+  const seqCode = scenarios.find((s) => s.id === activeScenario)?.seq ?? "";
+  function setSeqCode(updater: string | ((prev: string) => string)) {
+    setScenarios((prev) =>
+      prev.map((s) =>
+        s.id === activeScenario
+          ? { ...s, seq: typeof updater === "function" ? updater(s.seq) : updater }
+          : s,
+      ),
+    );
+  }
   const [faults, setFaults] = useState<Fault[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const [canvasState, setCanvasState] = useState<CanvasState>({ positions: {}, edges: [] });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
-  const [drawerTab, setDrawerTab] = useState<"sequence" | "findings" | "playback">("playback");
+  const [drawerTab, setDrawerTab] = useState<"sequence" | "findings" | "playback" | "load">("playback");
   const [drawerOpen, setDrawerOpen] = useState(true);
+  const [paletteExpanded, setPaletteExpanded] = useState(false);
+  const [showLegend, setShowLegend] = useState(true);
+  const [showGuide, setShowGuide] = useState(false);
 
   // playback
   const [playing, setPlaying] = useState(false);
