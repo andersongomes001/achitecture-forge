@@ -596,6 +596,7 @@ function ForgePage() {
                 onChange={(e) => setSpeed(Number(e.target.value))}
                 className="w-20 accent-primary" title={`${speed}ms / step`} />
             </div>
+            {showLegend && <Legend />}
           </div>
 
           {/* Bottom drawer */}
