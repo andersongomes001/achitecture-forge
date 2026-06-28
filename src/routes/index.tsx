@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind, TYPE_GLYPH } from "@/components/arch/ArchCanvas";
+import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind, TYPE_GLYPH, EDGE_STYLE, EDGE_LEGEND } from "@/components/arch/ArchCanvas";
 import { Inspector } from "@/components/arch/Inspector";
 import { parseSequence } from "@/lib/arch/parser";
 import { importFromMermaid } from "@/lib/arch/import";
+import { generateMermaid } from "@/lib/arch/generate";
+import { computeLoad, fmtRate, type LoadRow } from "@/lib/arch/load";
 import { simulate } from "@/lib/arch/simulator";
 import {
   addDlqFor,
