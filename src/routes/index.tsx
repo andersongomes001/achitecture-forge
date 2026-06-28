@@ -1,12 +1,28 @@
-import { useMemo, useState } from "react";
-import { MermaidView } from "@/components/arch/MermaidView";
-import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind } from "@/components/arch/ArchCanvas";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind, TYPE_GLYPH } from "@/components/arch/ArchCanvas";
+import { Inspector } from "@/components/arch/Inspector";
 import { parseSequence } from "@/lib/arch/parser";
 import { importFromMermaid } from "@/lib/arch/import";
 import { simulate } from "@/lib/arch/simulator";
-import type { ArchElement, BrokerKind, ElementType, Fault, Severity, TopicKind, TopicBinding } from "@/lib/arch/types";
+import {
+  addDlqFor,
+  addRetryFor,
+  convertStepToAsync,
+  patchElement,
+  setInbox,
+  setOutbox,
+  syncDbReplicas,
+} from "@/lib/arch/helpers";
+import type {
+  ArchElement,
+  Contract,
+  ElementType,
+  Fault,
+  RemediationAction,
+  Severity,
+  TopicKind,
+} from "@/lib/arch/types";
 import { createFileRoute } from "@tanstack/react-router";
-
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -15,37 +31,23 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Design distributed systems and simulate sequence diagrams to catch idempotency, outbox/inbox and async delivery bugs before they ship.",
+          "Miro-style canvas for designing distributed systems and simulating sequence diagrams. Catch idempotency, outbox/inbox, dual-write and ordering bugs before they ship.",
       },
       { property: "og:title", content: "Forge — Architecture Design Tester" },
       {
         property: "og:description",
         content:
-          "Drag in services, queues and databases. Write a Mermaid sequence. Run the simulator and surface dual-write, dedup and sync-coupling issues.",
+          "Drop services, queues, brokers and databases on a Miro-style board. Configure SQS/Kafka/RabbitMQ realism. Run the simulator with fault injection and one-click remediation.",
       },
     ],
   }),
   component: ForgePage,
 });
 
-const TYPE_META: Record<ElementType, { label: string; glyph: string; color: string }> = {
-  service: { label: "Service", glyph: "◇", color: "var(--color-primary)" },
-  database: { label: "Database", glyph: "▭", color: "var(--color-info)" },
-  queue: { label: "Queue", glyph: "≡", color: "var(--color-warning)" },
-  topic: { label: "Topic", glyph: "✦", color: "var(--color-accent)" },
-  cache: { label: "Cache", glyph: "◷", color: "var(--color-success)" },
-  external: { label: "External", glyph: "◯", color: "var(--color-muted-foreground)" },
-  "api-gateway": { label: "API Gateway", glyph: "⌥", color: "var(--color-primary)" },
-  lambda: { label: "Lambda / FaaS", glyph: "λ", color: "var(--color-accent)" },
-  scheduler: { label: "Scheduler", glyph: "⏱", color: "var(--color-info)" },
-  stream: { label: "Stream Processor", glyph: "⌇", color: "var(--color-warning)" },
-  saga: { label: "Saga Orchestrator", glyph: "⎈", color: "var(--color-success)" },
-};
-
 const DEFAULT_ELEMENTS: ArchElement[] = [
   { id: "API", name: "Orders API", type: "service" },
-  { id: "DB", name: "Orders DB", type: "database" },
-  { id: "BUS", name: "Events Bus", type: "topic" },
+  { id: "DB", name: "Orders DB", type: "database", dbEngine: "postgres" },
+  { id: "BUS", name: "Events Bus", type: "topic", topicKind: "fanout", broker: "generic" },
   { id: "WORKER", name: "Email Worker", type: "service" },
 ];
 
@@ -66,22 +68,15 @@ const DEFAULT_SEQ = `sequenceDiagram
 const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   outbox: {
     elements: [
-      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"] },
-      { id: "DB", name: "Orders DB", type: "database" },
-      { id: "RELAY", name: "Outbox Relay", type: "service", idempotent: true },
-      { id: "BUS", name: "Events Bus", type: "topic", topicKind: "fanout", bindings: [{ queueId: "Q_MAIL" }] },
-      { id: "Q_MAIL", name: "Mail Queue", type: "queue", hasInbox: true },
+      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"], outboxRelayId: "RELAY" },
+      { id: "DB", name: "Orders DB", type: "database", dbEngine: "postgres" },
+      { id: "RELAY", name: "Outbox Relay", type: "relay", idempotent: true, isRelayFor: "API" },
+      { id: "BUS", name: "Events Bus", type: "topic", topicKind: "fanout", broker: "rabbitmq", bindings: [{ queueId: "Q_MAIL" }] },
+      { id: "Q_MAIL", name: "Mail Queue", type: "queue", broker: "rabbitmq", hasInbox: true },
       { id: "MAIL", name: "Email Worker", type: "service", hasInbox: true, idempotent: true },
     ],
     seq: `sequenceDiagram
   autonumber
-  participant API
-  participant DB
-  participant RELAY
-  participant BUS
-  participant Q_MAIL
-  participant MAIL
-
   API->>DB: insert order + outbox row
   Note over API: db write committed
   RELAY->>DB: poll outbox
@@ -91,127 +86,25 @@ const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   MAIL->>MAIL: send email
 `,
   },
-  cqrs: {
-    elements: [
-      { id: "API", name: "Write API", type: "service", dataStores: ["WDB"] },
-      { id: "WDB", name: "Write DB", type: "database" },
-      { id: "BUS", name: "Domain Events", type: "topic", topicKind: "pubsub", bindings: [{ queueId: "Q_PROJ" }] },
-      { id: "Q_PROJ", name: "Projector Queue", type: "queue", hasInbox: true },
-      { id: "PROJ", name: "Projector", type: "service", idempotent: true, dataStores: ["RDB"] },
-      { id: "RDB", name: "Read Model", type: "database" },
-      { id: "READ", name: "Query API", type: "service", dataStores: ["RDB"] },
-    ],
-    seq: `sequenceDiagram
-  autonumber
-  participant API
-  participant WDB
-  participant BUS
-  participant Q_PROJ
-  participant PROJ
-  participant RDB
-  participant READ
-
-  API->>WDB: persist command
-  API-)BUS: OrderChanged
-  BUS-)Q_PROJ: OrderChanged
-  Q_PROJ-)PROJ: OrderChanged
-  PROJ->>RDB: upsert read model
-  READ->>RDB: query
-`,
-  },
-  saga: {
-    elements: [
-      { id: "ORDER", name: "Order Svc", type: "service", hasOutbox: true, idempotent: true, dataStores: ["ODB"] },
-      { id: "ODB", name: "Order DB", type: "database" },
-      { id: "BUS", name: "Saga Bus", type: "topic", topicKind: "topic", bindings: [
-        { queueId: "Q_PAY", routingKey: "order.*" },
-        { queueId: "Q_INV", routingKey: "order.*" },
-      ] },
-      { id: "Q_PAY", name: "Payment Q", type: "queue", hasInbox: true },
-      { id: "Q_INV", name: "Inventory Q", type: "queue", hasInbox: true },
-      { id: "PAY", name: "Payment Svc", type: "service", idempotent: true },
-      { id: "INV", name: "Inventory Svc", type: "service", idempotent: true },
-    ],
-    seq: `sequenceDiagram
-  autonumber
-  participant ORDER
-  participant ODB
-  participant BUS
-  participant Q_PAY
-  participant PAY
-  participant Q_INV
-  participant INV
-
-  ORDER->>ODB: create order pending
-  ORDER-)BUS: order.created
-  BUS-)Q_PAY: order.created
-  BUS-)Q_INV: order.created
-  Q_PAY-)PAY: order.created
-  Q_INV-)INV: order.created
-  PAY-)BUS: order.paid
-  INV-)BUS: order.reserved
-`,
-  },
-  fanout: {
-    elements: [
-      { id: "API", name: "Publisher", type: "service" },
-      { id: "BUS", name: "Notify Topic", type: "topic", topicKind: "fanout", bindings: [
-        { queueId: "Q_PUSH" }, { queueId: "Q_MAIL" }, { queueId: "Q_SMS" },
-      ] },
-      { id: "Q_PUSH", name: "Push Queue", type: "queue", hasInbox: true },
-      { id: "Q_MAIL", name: "Mail Queue", type: "queue", hasInbox: true },
-      { id: "Q_SMS", name: "SMS Queue", type: "queue", hasInbox: true },
-      { id: "PUSH", name: "Push Worker", type: "service", idempotent: true },
-      { id: "MAIL", name: "Mail Worker", type: "service", idempotent: true },
-      { id: "SMS", name: "SMS Worker", type: "service", idempotent: true },
-    ],
-    seq: `sequenceDiagram
-  autonumber
-  participant API
-  participant BUS
-  participant Q_PUSH
-  participant Q_MAIL
-  participant Q_SMS
-  participant PUSH
-  participant MAIL
-  participant SMS
-
-  API-)BUS: UserSignedUp
-  BUS-)Q_PUSH: UserSignedUp
-  BUS-)Q_MAIL: UserSignedUp
-  BUS-)Q_SMS: UserSignedUp
-  Q_PUSH-)PUSH: deliver
-  Q_MAIL-)MAIL: deliver
-  Q_SMS-)SMS: deliver
-`,
-  },
   snsSqs: {
     elements: [
-      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"] },
-      { id: "DB", name: "Orders DB", type: "database" },
+      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"], outboxRelayId: "RELAY" },
+      { id: "DB", name: "Orders DB", type: "database", dbEngine: "postgres", dbReplicas: 2 },
+      { id: "RELAY", name: "Outbox Relay", type: "relay", isRelayFor: "API" },
       { id: "SNS", name: "orders-topic", type: "topic", topicKind: "fanout", broker: "sns",
         bindings: [{ queueId: "Q_MAIL", filter: "eventType=OrderPlaced" }, { queueId: "Q_ANALYTICS" }] },
       { id: "Q_MAIL", name: "mail-queue", type: "queue", broker: "sqs", hasInbox: true,
-        visibilityTimeoutSec: 30, maxReceives: 5, dlqId: "DLQ_MAIL", retentionHours: 96 },
-      { id: "DLQ_MAIL", name: "mail-dlq", type: "queue", broker: "sqs", retentionHours: 336 },
-      { id: "Q_ANALYTICS", name: "analytics-queue", type: "queue", broker: "sqs", fifo: true,
-        hasInbox: true, visibilityTimeoutSec: 60 },
+        visibilityTimeoutSec: 30, maxReceives: 5, dlqId: "Q_MAIL_DLQ", retentionHours: 96 },
+      { id: "Q_MAIL_DLQ", name: "mail-dlq", type: "queue", broker: "sqs", retentionHours: 336, isDlqFor: "Q_MAIL" },
+      { id: "Q_ANALYTICS", name: "analytics-queue", type: "queue", broker: "sqs", fifo: true, hasInbox: true, visibilityTimeoutSec: 60 },
       { id: "MAIL", name: "Email Worker", type: "lambda", idempotent: true, hasInbox: true },
-      { id: "ANALY", name: "Analytics Worker", type: "service", idempotent: true, hasInbox: true },
+      { id: "ANALY", name: "Analytics Worker", type: "service", idempotent: true, hasInbox: true, circuitBreaker: true },
     ],
     seq: `sequenceDiagram
   autonumber
-  participant API
-  participant DB
-  participant SNS
-  participant Q_MAIL
-  participant Q_ANALYTICS
-  participant MAIL
-  participant ANALY
-
   API->>DB: insert order + outbox row
   Note over API: db write committed
-  API-)SNS: OrderPlaced
+  RELAY-)SNS: OrderPlaced
   SNS-)Q_MAIL: OrderPlaced
   SNS-)Q_ANALYTICS: OrderPlaced
   Q_MAIL-)MAIL: deliver
@@ -221,31 +114,24 @@ const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   kafkaStream: {
     elements: [
       { id: "GW", name: "API Gateway", type: "api-gateway" },
-      { id: "API", name: "Ingest Svc", type: "service", hasOutbox: true, dataStores: ["DB"] },
-      { id: "DB", name: "Ingest DB", type: "database" },
+      { id: "API", name: "Ingest Svc", type: "service", hasOutbox: true, dataStores: ["DB"], outboxRelayId: "RELAY", circuitBreaker: true },
+      { id: "DB", name: "Ingest DB", type: "database", dbEngine: "postgres", dbReplicas: 1 },
+      { id: "RELAY", name: "Outbox Relay", type: "relay", isRelayFor: "API" },
       { id: "KAFKA", name: "events", type: "topic", topicKind: "pubsub", broker: "kafka",
-        partitions: 12, schemaContract: true, bindings: [{ queueId: "CG_PROC" }, { queueId: "CG_AUDIT" }] },
+        partitions: 12, replicationFactor: 3, schemaContract: true,
+        bindings: [{ queueId: "CG_PROC" }, { queueId: "CG_AUDIT" }] },
       { id: "CG_PROC", name: "processors-cg", type: "queue", broker: "kafka", consumerGroup: "processors", hasInbox: true },
       { id: "CG_AUDIT", name: "audit-cg", type: "queue", broker: "kafka", consumerGroup: "audit", hasInbox: true },
       { id: "STREAM", name: "Enrichment Stream", type: "stream", idempotent: true },
       { id: "AUDIT", name: "Audit Sink", type: "service", idempotent: true, dataStores: ["WAREHOUSE"] },
-      { id: "WAREHOUSE", name: "Data Warehouse", type: "database" },
+      { id: "WAREHOUSE", name: "Data Warehouse", type: "database", dbEngine: "clickhouse" },
     ],
     seq: `sequenceDiagram
   autonumber
-  participant GW
-  participant API
-  participant DB
-  participant KAFKA
-  participant CG_PROC
-  participant STREAM
-  participant CG_AUDIT
-  participant AUDIT
-
   GW->>API: POST /events
   API->>DB: persist
   Note over API: db write committed
-  API-)KAFKA: event.raw
+  RELAY-)KAFKA: event.raw
   KAFKA-)CG_PROC: event.raw
   CG_PROC-)STREAM: process
   STREAM-)KAFKA: event.enriched
@@ -253,36 +139,23 @@ const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   CG_AUDIT-)AUDIT: persist
 `,
   },
-  sagaOrchestrator: {
+  saga: {
     elements: [
       { id: "API", name: "Checkout API", type: "service" },
       { id: "SAGA", name: "Checkout Saga", type: "saga", idempotent: true, dataStores: ["SDB"] },
-      { id: "SDB", name: "Saga State", type: "database" },
+      { id: "SDB", name: "Saga State", type: "database", dbEngine: "postgres" },
       { id: "BUS", name: "commands", type: "topic", topicKind: "direct", broker: "rabbitmq",
         bindings: [
           { queueId: "Q_PAY", routingKey: "payment" },
           { queueId: "Q_INV", routingKey: "inventory" },
-          { queueId: "Q_SHIP", routingKey: "shipping" },
         ] },
-      { id: "Q_PAY", name: "payment.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
-      { id: "Q_INV", name: "inventory.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
-      { id: "Q_SHIP", name: "shipping.cmd", type: "queue", broker: "rabbitmq", hasInbox: true },
-      { id: "PAY", name: "Payment Svc", type: "service", idempotent: true },
+      { id: "Q_PAY", name: "payment.cmd", type: "queue", broker: "rabbitmq", hasInbox: true, rabbitDurable: true, prefetch: 10 },
+      { id: "Q_INV", name: "inventory.cmd", type: "queue", broker: "rabbitmq", hasInbox: true, rabbitDurable: true, prefetch: 10 },
+      { id: "PAY", name: "Payment Svc", type: "service", idempotent: true, circuitBreaker: true },
       { id: "INV", name: "Inventory Svc", type: "service", idempotent: true },
-      { id: "SHIP", name: "Shipping Svc", type: "service", idempotent: true },
     ],
     seq: `sequenceDiagram
   autonumber
-  participant API
-  participant SAGA
-  participant BUS
-  participant Q_PAY
-  participant PAY
-  participant Q_INV
-  participant INV
-  participant Q_SHIP
-  participant SHIP
-
   API->>SAGA: start checkout
   SAGA-)BUS: payment.charge
   BUS-)Q_PAY: payment.charge
@@ -292,9 +165,6 @@ const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   BUS-)Q_INV: inventory.reserve
   Q_INV-)INV: reserve
   INV-)SAGA: inventory.ok
-  SAGA-)BUS: shipping.dispatch
-  BUS-)Q_SHIP: shipping.dispatch
-  Q_SHIP-)SHIP: dispatch
 `,
   },
 };
@@ -304,16 +174,33 @@ function uid() {
 }
 
 function ForgePage() {
-  const [elements, setElements] = useState<ArchElement[]>(DEFAULT_ELEMENTS);
+  const [elements, setElementsRaw] = useState<ArchElement[]>(DEFAULT_ELEMENTS);
   const [seqCode, setSeqCode] = useState(DEFAULT_SEQ);
   const [faults, setFaults] = useState<Fault[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const [canvasState, setCanvasState] = useState<CanvasState>({ positions: {}, edges: [] });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showInspector, setShowInspector] = useState(true);
+  const [drawerTab, setDrawerTab] = useState<"sequence" | "findings" | "playback">("playback");
+  const [drawerOpen, setDrawerOpen] = useState(true);
+
+  // playback
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(900); // ms per step
+  const playRef = useRef<number | null>(null);
+
+  function setElements(updater: ArchElement[] | ((prev: ArchElement[]) => ArchElement[])) {
+    setElementsRaw((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      return syncDbReplicas(next);
+    });
+  }
 
   const parsed = useMemo(() => parseSequence(seqCode), [seqCode]);
   const result = useMemo(
-    () => simulate({ elements, steps: parsed.steps, faults }),
-    [elements, parsed.steps, faults],
+    () => simulate({ elements, steps: parsed.steps, faults, contracts }),
+    [elements, parsed.steps, faults, contracts],
   );
 
   const activeEdgeKeys = useMemo(() => {
@@ -324,12 +211,19 @@ function ForgePage() {
     return set;
   }, [currentStep, parsed.steps]);
 
-  // Auto-generated edges from element configuration:
-  //  - topic bindings -> visual edge per exchange kind
-  //  - service.dataStores -> "owns" edge to each db/cache
+  const failedEdgeKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const ev of result.events) {
+      if (ev.severity !== "error") continue;
+      const s = parsed.steps[ev.stepIndex];
+      if (s?.from && s?.to) set.add(`${s.from}->${s.to}`);
+    }
+    return set;
+  }, [result.events, parsed.steps]);
+
   const managedEdges = useMemo<ManagedEdge[]>(() => {
     const out: ManagedEdge[] = [];
-    const elementIds = new Set(elements.map((e) => e.id));
+    const ids = new Set(elements.map((e) => e.id));
     for (const el of elements) {
       if (el.type === "topic" && el.bindings?.length) {
         const kindMap: Record<TopicKind, EdgeKind> = {
@@ -341,69 +235,107 @@ function ForgePage() {
         };
         const tKind = el.topicKind ?? "fanout";
         for (const b of el.bindings) {
-          if (!b.queueId || !elementIds.has(b.queueId)) continue;
+          if (!b.queueId || !ids.has(b.queueId)) continue;
           const label =
-            tKind === "fanout"
-              ? "fanout"
-              : tKind === "pubsub"
-                ? "pub/sub"
-                : tKind === "headers"
-                  ? `hdr:${b.routingKey ?? ""}`
-                  : b.routingKey || tKind;
-          out.push({
-            id: `mng:bind:${el.id}->${b.queueId}:${b.routingKey ?? ""}`,
-            source: el.id,
-            target: b.queueId,
-            kind: kindMap[tKind],
-            label,
-          });
+            tKind === "fanout" ? "fanout"
+              : tKind === "pubsub" ? "pub/sub"
+              : tKind === "headers" ? `hdr:${b.routingKey ?? ""}`
+              : b.routingKey || tKind;
+          out.push({ id: `mng:bind:${el.id}->${b.queueId}:${b.routingKey ?? ""}`, source: el.id, target: b.queueId, kind: kindMap[tKind], label });
         }
       }
-      if (el.type === "service" && el.dataStores?.length) {
+      if ((el.type === "service" || el.type === "lambda" || el.type === "saga" || el.type === "stream") && el.dataStores?.length) {
         for (const dsId of el.dataStores) {
-          if (!elementIds.has(dsId)) continue;
-          out.push({
-            id: `mng:owns:${el.id}->${dsId}`,
-            source: el.id,
-            target: dsId,
-            kind: "owns",
-            label: "owns",
-          });
+          if (!ids.has(dsId)) continue;
+          out.push({ id: `mng:owns:${el.id}->${dsId}`, source: el.id, target: dsId, kind: "owns", label: "owns" });
         }
       }
-      if (el.type === "queue" && el.dlqId && elementIds.has(el.dlqId)) {
-        out.push({
-          id: `mng:dlq:${el.id}->${el.dlqId}`,
-          source: el.id,
-          target: el.dlqId,
-          kind: "dlq",
-          label: `DLQ${el.maxReceives ? ` · max ${el.maxReceives}` : ""}`,
-        });
+      if (el.type === "queue" && el.dlqId && ids.has(el.dlqId)) {
+        out.push({ id: `mng:dlq:${el.id}->${el.dlqId}`, source: el.id, target: el.dlqId, kind: "dlq",
+          label: `DLQ${el.maxReceives ? ` · max ${el.maxReceives}` : ""}` });
+      }
+      if (el.type === "queue" && el.retryQueueId && ids.has(el.retryQueueId)) {
+        out.push({ id: `mng:retry:${el.id}->${el.retryQueueId}`, source: el.id, target: el.retryQueueId, kind: "retry",
+          label: `retry${el.retryDelayMs ? ` ${el.retryDelayMs}ms` : ""}` });
+      }
+      if (el.type === "relay" && el.isRelayFor && ids.has(el.isRelayFor)) {
+        const svc = elements.find((e) => e.id === el.isRelayFor);
+        // relay reads from the service's first datastore
+        const firstDb = svc?.dataStores?.[0];
+        if (firstDb && ids.has(firstDb)) {
+          out.push({ id: `mng:relayread:${el.id}->${firstDb}`, source: el.id, target: firstDb, kind: "relay-read", label: "poll outbox" });
+        }
+      }
+      if (el.type === "inbox-store" && el.isInboxFor && ids.has(el.isInboxFor)) {
+        out.push({ id: `mng:inbox:${el.isInboxFor}->${el.id}`, source: el.isInboxFor, target: el.id, kind: "inbox-of", label: "dedup" });
+      }
+      if (el.type === "database" && el.isReplicaOf && ids.has(el.isReplicaOf)) {
+        out.push({ id: `mng:replica:${el.isReplicaOf}->${el.id}`, source: el.isReplicaOf, target: el.id, kind: "replica", label: "replica" });
       }
     }
     return out;
   }, [elements]);
 
+  // playback driver
+  useEffect(() => {
+    if (!playing) {
+      if (playRef.current) window.clearTimeout(playRef.current);
+      return;
+    }
+    if (parsed.steps.length === 0) {
+      setPlaying(false);
+      return;
+    }
+    playRef.current = window.setTimeout(() => {
+      setCurrentStep((s) => {
+        const next = s == null ? 0 : s + 1;
+        if (next >= parsed.steps.length) {
+          setPlaying(false);
+          return null;
+        }
+        return next;
+      });
+    }, speed);
+    return () => { if (playRef.current) window.clearTimeout(playRef.current); };
+  }, [playing, currentStep, speed, parsed.steps.length]);
 
-
-  function addElement(type: ElementType) {
+  function addElement(type: ElementType, pos?: { x: number; y: number }) {
     const id = uid();
     const extra: Partial<ArchElement> =
-      type === "topic"
-        ? { topicKind: "fanout", bindings: [], broker: "generic" }
-        : type === "queue"
-          ? { broker: "generic" }
-          : {};
-    setElements((es) => [
-      ...es,
-      { id, name: `${TYPE_META[type].label} ${id}`, type, hasInbox: false, hasOutbox: false, idempotent: false, ...extra },
-    ]);
+      type === "topic" ? { topicKind: "fanout", bindings: [], broker: "generic" }
+      : type === "queue" ? { broker: "generic" }
+      : type === "database" ? { dbEngine: "generic" }
+      : {};
+    const meta = TYPE_GLYPH[type];
+    const newEl: ArchElement = { id, name: `${meta.label} ${id}`, type, ...extra };
+    setElements((es) => [...es, newEl]);
+    if (pos) {
+      setCanvasState((s) => ({ ...s, positions: { ...s.positions, [id]: pos } }));
+    }
+    setSelectedId(id);
+    setShowInspector(true);
   }
+
   function patchEl(id: string, patch: Partial<ArchElement>) {
-    setElements((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    setElements((es) => patchElement(es, id, patch));
   }
   function removeEl(id: string) {
     setElements((es) => es.filter((e) => e.id !== id));
+    if (selectedId === id) setSelectedId(null);
+  }
+
+  // remediation dispatcher
+  function applyRemediation(a: RemediationAction) {
+    switch (a.kind) {
+      case "addOutbox": setElements((es) => setOutbox(es, a.targetId, true)); break;
+      case "addInbox": setElements((es) => setInbox(es, a.targetId, true)); break;
+      case "makeIdempotent": setElements((es) => patchElement(es, a.targetId, { idempotent: true })); break;
+      case "addCircuitBreaker": setElements((es) => patchElement(es, a.targetId, { circuitBreaker: true })); break;
+      case "addDlq": setElements((es) => addDlqFor(es, a.targetId)); break;
+      case "addRetry": setElements((es) => addRetryFor(es, a.targetId)); break;
+      case "convertAsync": setSeqCode((src) => convertStepToAsync(src, Number(a.targetId))); break;
+      case "addContract": addContract(); break;
+    }
   }
 
   function toggleFault(stepIndex: number, kind: Fault["kind"]) {
@@ -413,329 +345,399 @@ function ForgePage() {
       return [...fs, { stepIndex, kind }];
     });
   }
-
   function hasFault(stepIndex: number, kind: Fault["kind"]) {
     return faults.some((f) => f.stepIndex === stepIndex && f.kind === kind);
   }
 
+  function addContract() {
+    const id = uid();
+    setContracts((cs) => [...cs, { id, name: `Contract ${id}`, version: "1.0.0" }]);
+  }
+  function patchContract(id: string, p: Partial<Contract>) {
+    setContracts((cs) => cs.map((c) => (c.id === id ? { ...c, ...p } : c)));
+  }
+  function removeContract(id: string) {
+    setContracts((cs) => cs.filter((c) => c.id !== id));
+  }
+
+  function exportJson() {
+    const blob = new Blob(
+      [JSON.stringify({ elements, edges: canvasState.edges, positions: canvasState.positions, contracts, seq: seqCode, faults }, null, 2)],
+      { type: "application/json" },
+    );
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "forge-architecture.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  const selected = elements.find((e) => e.id === selectedId) ?? null;
+  const stepEvents = useMemo(() => {
+    const map = new Map<number, typeof result.events>();
+    for (const ev of result.events) {
+      const arr = map.get(ev.stepIndex) ?? [];
+      arr.push(ev);
+      map.set(ev.stepIndex, arr);
+    }
+    return map;
+  }, [result.events]);
+
   return (
-    <div className="min-h-screen text-foreground">
-      <header className="border-b border-border bg-surface/60 backdrop-blur sticky top-0 z-10">
-        <div className="mx-auto max-w-[1600px] px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-md grid place-items-center border border-primary/40 bg-primary/10 text-primary font-mono text-lg">
-              ⌬
-            </div>
-            <div>
-              <h1 className="text-base font-semibold tracking-tight">Forge</h1>
-              <p className="text-xs text-muted-foreground -mt-0.5">
-                Architecture design tester · Mermaid sequence simulator
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                const { elements: imported, edges: importedEdges } = importFromMermaid(seqCode, elements);
-                setElements(imported);
-                setCanvasState((s) => {
-                  // merge: keep existing user edges, add any new ones from import
-                  const existingKeys = new Set(s.edges.map((e) => `${e.source}->${e.target}:${e.kind}`));
-                  const additions = importedEdges
-                    .filter((e) => !existingKeys.has(`${e.source}->${e.target}:${e.kind}`))
-                    .map((e) => ({ id: e.id, source: e.source, target: e.target, kind: e.kind as EdgeKind }));
-                  return { positions: s.positions, edges: [...s.edges, ...additions] };
-                });
-              }}
-              className="text-xs px-2 py-1 rounded-md border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
-              title="Parse the sequence diagram and create matching components + connections"
-            >
-              ⇪ Import from Mermaid
-            </button>
-            <select
-              className="bg-surface-2 border border-border rounded-md px-2 py-1 text-xs"
-              value=""
-              onChange={(e) => {
-                const t = e.target.value as keyof typeof TEMPLATES;
-                if (t && TEMPLATES[t]) {
-                  setElements(TEMPLATES[t].elements);
-                  setSeqCode(TEMPLATES[t].seq);
-                  setCanvasState({ positions: {}, edges: [] });
-                  setFaults([]);
-                }
-                e.currentTarget.value = "";
-              }}
-              title="Load architecture pattern template"
-            >
-              <option value="">⌬ Templates…</option>
-              <option value="outbox">Transactional Outbox</option>
-              <option value="cqrs">CQRS + Read Model</option>
-              <option value="saga">Choreography Saga</option>
-              <option value="fanout">Fan-out Notifications</option>
-              <option value="snsSqs">SNS → SQS (fanout + DLQ)</option>
-              <option value="kafkaStream">Kafka Stream Processing</option>
-              <option value="sagaOrchestrator">Saga Orchestrator</option>
-            </select>
-            <Pill tone="info">{parsed.steps.length} steps</Pill>
-            <Pill tone={result.summary.errors ? "error" : "success"}>
-              {result.summary.errors} errors
-            </Pill>
-            <Pill tone={result.summary.warnings ? "warning" : "muted"}>
-              {result.summary.warnings} warnings
-            </Pill>
+    <div className="h-screen flex flex-col text-foreground overflow-hidden">
+      {/* Top toolbar */}
+      <header className="h-12 border-b border-border bg-surface/80 backdrop-blur flex items-center px-3 gap-2 shrink-0 z-20">
+        <div className="flex items-center gap-2 pr-3 border-r border-border">
+          <div className="w-7 h-7 rounded grid place-items-center border border-primary/40 bg-primary/10 text-primary font-mono">⌬</div>
+          <div className="leading-tight">
+            <div className="text-xs font-semibold tracking-tight">Forge</div>
+            <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Architecture Tester</div>
           </div>
         </div>
+
+        <select
+          className="bg-surface-2 border border-border rounded-md px-2 py-1 text-xs"
+          value=""
+          onChange={(e) => {
+            const t = e.target.value as keyof typeof TEMPLATES;
+            if (t && TEMPLATES[t]) {
+              setElements(TEMPLATES[t].elements);
+              setSeqCode(TEMPLATES[t].seq);
+              setCanvasState({ positions: {}, edges: [] });
+              setFaults([]);
+              setSelectedId(null);
+            }
+            e.currentTarget.value = "";
+          }}
+        >
+          <option value="">⌬ Templates…</option>
+          <option value="outbox">Transactional Outbox</option>
+          <option value="snsSqs">SNS → SQS (fanout + DLQ)</option>
+          <option value="kafkaStream">Kafka Stream Processing</option>
+          <option value="saga">Saga Orchestrator</option>
+        </select>
+
+        <button
+          onClick={() => {
+            const { elements: imported, edges: importedEdges } = importFromMermaid(seqCode, elements);
+            setElements(imported);
+            setCanvasState((s) => {
+              const existingKeys = new Set(s.edges.map((e) => `${e.source}->${e.target}:${e.kind}`));
+              const additions = importedEdges
+                .filter((e) => !existingKeys.has(`${e.source}->${e.target}:${e.kind}`))
+                .map((e) => ({ id: e.id, source: e.source, target: e.target, kind: e.kind as EdgeKind }));
+              return { positions: s.positions, edges: [...s.edges, ...additions] };
+            });
+          }}
+          className="text-xs px-2 py-1 rounded-md border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
+        >
+          ⇪ Import Mermaid
+        </button>
+
+        <button onClick={exportJson}
+          className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
+          ↧ Export JSON
+        </button>
+
+        <div className="flex-1" />
+
+        <Pill tone="info">{parsed.steps.length} steps</Pill>
+        <Pill tone={result.summary.errors ? "error" : "success"}>{result.summary.errors} errors</Pill>
+        <Pill tone={result.summary.warnings ? "warning" : "muted"}>{result.summary.warnings} warnings</Pill>
+
+        <button
+          onClick={() => setShowInspector((v) => !v)}
+          className="ml-2 text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary"
+        >
+          {showInspector ? "Hide inspector ›" : "‹ Inspector"}
+        </button>
       </header>
 
-      <main className="mx-auto max-w-[1600px] px-6 py-6 grid grid-cols-12 gap-6">
-        {/* Left: components */}
-        <section className="col-span-12 lg:col-span-3 space-y-4">
-          <Panel
-            title="Components"
-            action={
-              <select
-                className="bg-surface-2 border border-border rounded-md px-2 py-1 text-xs"
-                value=""
-                onChange={(e) => {
-                  if (e.target.value) addElement(e.target.value as ElementType);
-                  e.currentTarget.value = "";
-                }}
-              >
-                <option value="">+ Add…</option>
-                {Object.entries(TYPE_META).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
-            }
-          >
-            <div className="space-y-2">
-              {elements.map((el) => (
-                <ElementCard
-                  key={el.id}
-                  el={el}
-                  queues={elements.filter((e) => e.type === "queue")}
-                  databases={elements.filter((e) => e.type === "database" || e.type === "cache")}
-                  onChange={(p) => patchEl(el.id, p)}
-                  onRemove={() => removeEl(el.id)}
-                />
-              ))}
-              {elements.length === 0 && (
-                <p className="text-xs text-muted-foreground p-3">No components yet.</p>
-              )}
-            </div>
-          </Panel>
+      {/* Body: palette | canvas+drawer | inspector */}
+      <div className="flex-1 flex min-h-0">
+        <Palette onAdd={(t) => addElement(t)} />
 
-          <Panel title="Legend">
-            <ul className="text-xs space-y-1.5 text-muted-foreground">
-              <li>
-                <code className="text-primary">A-&gt;&gt;B</code> synchronous call
-              </li>
-              <li>
-                <code className="text-warning">A-)B</code> asynchronous message
-              </li>
-              <li>
-                <code className="text-info">A--&gt;&gt;B</code> response
-              </li>
-              <li>
-                <code className="text-accent">Note over A: db write</code> persists state
-              </li>
-            </ul>
-          </Panel>
-        </section>
-
-        {/* Center: architecture canvas + sequence */}
-        <section className="col-span-12 lg:col-span-6 space-y-4">
-          <Panel
-            title="Architecture canvas"
-            action={
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                drag to add · drag handles to connect · click line to change type
-              </span>
-            }
-          >
-            <DragPalette onAdd={(t) => addElement(t)} />
+        <div className="flex-1 flex flex-col min-w-0 relative">
+          <div className="flex-1 min-h-0 relative">
             <ArchCanvas
               elements={elements}
               state={canvasState}
               onStateChange={setCanvasState}
               activeEdgeKeys={activeEdgeKeys}
+              failedEdgeKeys={failedEdgeKeys}
+              selectedId={selectedId}
+              onSelect={(id) => { setSelectedId(id); if (id) setShowInspector(true); }}
               managedEdges={managedEdges}
-              onDropType={(type) => addElement(type)}
+              onDropType={(type, pos) => addElement(type, pos)}
+              onAddDlq={(id) => setElements((es) => addDlqFor(es, id))}
+              onAddRetry={(id) => setElements((es) => addRetryFor(es, id))}
             />
-          </Panel>
-
-
-
-          <Panel
-            title="Sequence diagram"
-            action={<span className="text-[10px] uppercase tracking-wider text-muted-foreground">mermaid</span>}
-          >
-            <textarea
-              className="mono w-full bg-surface-2 text-foreground text-[12.5px] leading-relaxed p-3 outline-none resize-y min-h-[260px] rounded-b-lg border-t border-border"
-              value={seqCode}
-              spellCheck={false}
-              onChange={(e) => setSeqCode(e.target.value)}
-            />
-          </Panel>
-
-          <Panel title="Rendered sequence">
-            <div className="p-3">
-              <MermaidView code={seqCode} />
-            </div>
-          </Panel>
-        </section>
-
-        {/* Right: simulator */}
-        <section className="col-span-12 lg:col-span-3 space-y-4">
-          <Panel
-            title="Simulator"
-            action={
-              <button
-                onClick={() => setFaults([])}
-                className="text-[11px] text-muted-foreground hover:text-foreground"
-              >
-                clear faults
+            {/* Floating playback HUD */}
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-surface/90 backdrop-blur border border-border rounded-full px-3 py-1.5 shadow-lg z-10">
+              <button onClick={() => { setCurrentStep(null); setPlaying(false); }} title="reset"
+                className="text-xs text-muted-foreground hover:text-foreground">⏮</button>
+              <button onClick={() => setCurrentStep((s) => Math.max(0, (s ?? 0) - 1))} title="prev"
+                className="text-xs text-muted-foreground hover:text-foreground">◀</button>
+              <button onClick={() => { if (currentStep == null) setCurrentStep(0); setPlaying((p) => !p); }}
+                className={`text-sm px-2 py-0.5 rounded ${playing ? "bg-destructive/20 text-destructive" : "bg-primary/20 text-primary"}`}>
+                {playing ? "⏸" : "▶"}
               </button>
-            }
-          >
-            <ol className="divide-y divide-border max-h-[420px] overflow-auto">
-              {parsed.steps.map((s) => (
-                <li
-                  key={s.index}
-                  className={`px-3 py-2 text-xs cursor-pointer transition-colors ${
-                    currentStep === s.index ? "bg-primary/10" : "hover:bg-surface-2"
-                  }`}
-                  onMouseEnter={() => setCurrentStep(s.index)}
-                  onMouseLeave={() => setCurrentStep(null)}
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="text-muted-foreground mono w-6">{s.index + 1}.</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="mono truncate" title={s.raw}>
-                        {s.raw}
-                      </div>
-                      {s.kind !== "note" && (
-                        <div className="mt-1 flex gap-1 flex-wrap">
-                          <FaultBtn active={hasFault(s.index, "drop")} onClick={() => toggleFault(s.index, "drop")}>
-                            drop
-                          </FaultBtn>
-                          <FaultBtn
-                            active={hasFault(s.index, "duplicate")}
-                            onClick={() => toggleFault(s.index, "duplicate")}
-                          >
-                            duplicate
-                          </FaultBtn>
-                          <FaultBtn
-                            active={hasFault(s.index, "reorder")}
-                            onClick={() => toggleFault(s.index, "reorder")}
-                          >
-                            reorder
-                          </FaultBtn>
-                        </div>
-                      )}
-                    </div>
-                    <KindBadge kind={s.kind} />
-                  </div>
-                </li>
-              ))}
-              {parsed.steps.length === 0 && (
-                <li className="p-4 text-xs text-muted-foreground">No steps parsed yet.</li>
-              )}
-            </ol>
-          </Panel>
+              <button onClick={() => setCurrentStep((s) => Math.min(parsed.steps.length - 1, (s ?? -1) + 1))} title="next"
+                className="text-xs text-muted-foreground hover:text-foreground">▶</button>
+              <span className="mono text-[10px] text-muted-foreground ml-1">
+                {currentStep == null ? "—" : `${currentStep + 1}/${parsed.steps.length}`}
+              </span>
+              <input type="range" min={200} max={2000} step={100} value={speed}
+                onChange={(e) => setSpeed(Number(e.target.value))}
+                className="w-20 accent-primary" title={`${speed}ms / step`} />
+            </div>
+          </div>
 
-          <Panel title={`Findings · ${result.events.length}`}>
-            <ul className="divide-y divide-border max-h-[420px] overflow-auto">
-              {result.events.map((ev, i) => (
-                <li
-                  key={i}
-                  className={`px-3 py-2 text-xs ${
-                    currentStep === ev.stepIndex ? "bg-surface-2" : ""
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <SeverityDot s={ev.severity} />
-                    <div>
-                      <div className="font-medium">{ev.message}</div>
-                      {ev.detail && <div className="text-muted-foreground mt-0.5">{ev.detail}</div>}
-                      <div className="text-[10px] text-muted-foreground mt-1 mono">
-                        step {ev.stepIndex + 1}
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              ))}
-              {result.events.length === 0 && (
-                <li className="p-4 text-xs text-muted-foreground">
-                  No issues detected. Try injecting a duplicate or drop.
-                </li>
-              )}
-            </ul>
-          </Panel>
-        </section>
-      </main>
+          {/* Bottom drawer */}
+          <div className={`border-t border-border bg-surface/70 backdrop-blur transition-all ${drawerOpen ? "h-[280px]" : "h-9"} shrink-0 flex flex-col`}>
+            <div className="flex items-center gap-1 px-2 h-9 border-b border-border bg-surface-2/40 shrink-0">
+              <DrawerTab active={drawerTab === "playback"} onClick={() => { setDrawerTab("playback"); setDrawerOpen(true); }}>
+                ▶ Trace
+              </DrawerTab>
+              <DrawerTab active={drawerTab === "findings"} onClick={() => { setDrawerTab("findings"); setDrawerOpen(true); }}>
+                ⚠ Findings · {result.events.length}
+              </DrawerTab>
+              <DrawerTab active={drawerTab === "sequence"} onClick={() => { setDrawerTab("sequence"); setDrawerOpen(true); }}>
+                ⌥ Sequence
+              </DrawerTab>
+              <div className="flex-1" />
+              <button onClick={() => setDrawerOpen((v) => !v)}
+                className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground px-2">
+                {drawerOpen ? "▾ hide" : "▴ show"}
+              </button>
+            </div>
+            {drawerOpen && (
+              <div className="flex-1 overflow-auto">
+                {drawerTab === "playback" && (
+                  <TraceView
+                    steps={parsed.steps}
+                    currentStep={currentStep}
+                    stepEvents={stepEvents}
+                    onHover={setCurrentStep}
+                    onApply={applyRemediation}
+                    onToggleFault={toggleFault}
+                    hasFault={hasFault}
+                  />
+                )}
+                {drawerTab === "findings" && (
+                  <FindingsView events={result.events} onApply={applyRemediation} onHover={setCurrentStep} currentStep={currentStep} />
+                )}
+                {drawerTab === "sequence" && (
+                  <textarea
+                    className="mono w-full h-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
+                    value={seqCode}
+                    spellCheck={false}
+                    onChange={(e) => setSeqCode(e.target.value)}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {showInspector && (
+          <Inspector
+            element={selected}
+            elements={elements}
+            contracts={contracts}
+            onChange={(p) => selected && patchEl(selected.id, p)}
+            onRemove={() => selected && removeEl(selected.id)}
+            onSetOutbox={(v) => selected && setElements((es) => setOutbox(es, selected.id, v))}
+            onSetInbox={(v) => selected && setElements((es) => setInbox(es, selected.id, v))}
+            onAddDlq={() => selected && setElements((es) => addDlqFor(es, selected.id))}
+            onAddRetry={() => selected && setElements((es) => addRetryFor(es, selected.id))}
+            onAddContract={addContract}
+            onPatchContract={patchContract}
+            onRemoveContract={removeContract}
+            onClose={() => setShowInspector(false)}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function DragPalette({ onAdd }: { onAdd: (t: ElementType) => void }) {
+/* ------- subcomponents ------- */
+
+function Palette({ onAdd }: { onAdd: (t: ElementType) => void }) {
   return (
-    <div className="flex flex-wrap gap-1.5 px-3 py-2 border-b border-border bg-surface-2/30">
-      {(Object.keys(TYPE_META) as ElementType[]).map((t) => {
-        const m = TYPE_META[t];
+    <aside className="w-16 shrink-0 border-r border-border bg-surface/70 backdrop-blur flex flex-col items-center py-2 gap-1.5 overflow-y-auto">
+      {(Object.keys(TYPE_GLYPH) as ElementType[])
+        .filter((t) => t !== "relay" && t !== "inbox-store")
+        .map((t) => {
+          const m = TYPE_GLYPH[t];
+          return (
+            <button
+              key={t}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/arch-type", t);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onClick={() => onAdd(t)}
+              title={`Drag onto canvas or click to add ${m.label}`}
+              className="w-12 h-12 grid place-items-center rounded-md border border-border bg-surface hover:border-primary/60 hover:text-primary cursor-grab active:cursor-grabbing transition group relative"
+            >
+              <span className="mono text-xl" style={{ color: m.color }}>{m.glyph}</span>
+              <span className="absolute left-full ml-2 text-[10px] uppercase tracking-wider bg-surface border border-border rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-30">
+                {m.label}
+              </span>
+            </button>
+          );
+        })}
+    </aside>
+  );
+}
+
+function DrawerTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick}
+      className={`text-[10px] uppercase tracking-wider px-2.5 py-1 rounded border ${
+        active ? "border-primary/50 bg-primary/10 text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+      }`}>
+      {children}
+    </button>
+  );
+}
+
+function TraceView({
+  steps, currentStep, stepEvents, onHover, onApply, onToggleFault, hasFault,
+}: {
+  steps: ReturnType<typeof parseSequence>["steps"];
+  currentStep: number | null;
+  stepEvents: Map<number, { severity: Severity; message: string; detail?: string; suggestions?: RemediationAction[] }[]>;
+  onHover: (i: number | null) => void;
+  onApply: (a: RemediationAction) => void;
+  onToggleFault: (i: number, k: Fault["kind"]) => void;
+  hasFault: (i: number, k: Fault["kind"]) => boolean;
+}) {
+  return (
+    <ol className="divide-y divide-border">
+      {steps.map((s) => {
+        const isActive = currentStep === s.index;
+        const evs = stepEvents.get(s.index) ?? [];
+        const worst = evs.find((e) => e.severity === "error") ? "error"
+          : evs.find((e) => e.severity === "warning") ? "warning" : null;
         return (
-          <button
-            key={t}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData("application/arch-type", t);
-              e.dataTransfer.effectAllowed = "move";
-            }}
-            onClick={() => onAdd(t)}
-            className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border border-border bg-surface hover:border-primary/60 hover:text-primary cursor-grab active:cursor-grabbing"
-            title={`Drag onto canvas or click to add ${m.label}`}
-          >
-            <span className="mono" style={{ color: m.color }}>{m.glyph}</span>
-            {m.label}
-          </button>
+          <li key={s.index}
+            onMouseEnter={() => onHover(s.index)}
+            onMouseLeave={() => onHover(null)}
+            className={`px-3 py-2 text-xs transition-colors cursor-pointer ${
+              isActive ? "bg-primary/10"
+                : worst === "error" ? "bg-destructive/5"
+                : worst === "warning" ? "bg-warning/5"
+                : "hover:bg-surface-2/50"
+            }`}>
+            <div className="flex items-start gap-2">
+              <span className="mono w-6 text-muted-foreground">{s.index + 1}.</span>
+              <div className="flex-1 min-w-0">
+                <div className="mono text-[11.5px] truncate" title={s.raw}>{s.raw}</div>
+                {s.kind !== "note" && (
+                  <div className="mt-1 flex gap-1 flex-wrap">
+                    {(["drop", "duplicate", "reorder", "latency"] as Fault["kind"][]).map((k) => (
+                      <button key={k}
+                        onClick={() => onToggleFault(s.index, k)}
+                        className={`text-[9.5px] uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
+                          hasFault(s.index, k)
+                            ? "bg-destructive/20 border-destructive/60 text-destructive"
+                            : "border-border text-muted-foreground hover:text-foreground hover:bg-surface-2"
+                        }`}>
+                        {k}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {evs.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {evs.map((ev, i) => (
+                      <div key={i} className={`rounded border p-2 ${
+                        ev.severity === "error" ? "border-destructive/40 bg-destructive/10"
+                          : ev.severity === "warning" ? "border-warning/40 bg-warning/10"
+                          : ev.severity === "success" ? "border-success/40 bg-success/10"
+                          : "border-info/40 bg-info/10"
+                      }`}>
+                        <div className="flex items-start gap-1.5">
+                          <SeverityDot s={ev.severity} />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] font-medium leading-tight">{ev.message}</div>
+                            {ev.detail && <div className="text-[10.5px] text-muted-foreground mt-0.5 leading-snug">{ev.detail}</div>}
+                            {ev.suggestions && ev.suggestions.length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                {ev.suggestions.map((a, j) => (
+                                  <button key={j} onClick={(e) => { e.stopPropagation(); onApply(a); }}
+                                    className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-primary/50 bg-primary/10 text-primary hover:bg-primary/20">
+                                    ✦ {a.label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <KindBadge kind={s.kind} />
+            </div>
+          </li>
         );
       })}
-    </div>
+      {steps.length === 0 && (
+        <li className="p-4 text-xs text-muted-foreground">No steps parsed yet. Edit the sequence on the Sequence tab.</li>
+      )}
+    </ol>
   );
 }
 
-function Panel({
-  title,
-
-  action,
-  children,
+function FindingsView({
+  events, onApply, onHover, currentStep,
 }: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
+  events: { stepIndex: number; severity: Severity; message: string; detail?: string; suggestions?: RemediationAction[] }[];
+  onApply: (a: RemediationAction) => void;
+  onHover: (i: number | null) => void;
+  currentStep: number | null;
 }) {
   return (
-    <div className="panel overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-surface-2/40">
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          {title}
-        </h2>
-        {action}
-      </div>
-      {children}
-    </div>
+    <ul className="divide-y divide-border">
+      {events.map((ev, i) => (
+        <li key={i}
+          onMouseEnter={() => onHover(ev.stepIndex)}
+          onMouseLeave={() => onHover(null)}
+          className={`px-3 py-2 text-xs ${currentStep === ev.stepIndex ? "bg-surface-2" : ""}`}>
+          <div className="flex items-start gap-2">
+            <SeverityDot s={ev.severity} />
+            <div className="flex-1 min-w-0">
+              <div className="font-medium">{ev.message}</div>
+              {ev.detail && <div className="text-muted-foreground mt-0.5">{ev.detail}</div>}
+              <div className="text-[10px] text-muted-foreground mt-1 mono">step {ev.stepIndex + 1}</div>
+              {ev.suggestions && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {ev.suggestions.map((a, j) => (
+                    <button key={j} onClick={() => onApply(a)}
+                      className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-primary/50 bg-primary/10 text-primary hover:bg-primary/20">
+                      ✦ {a.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </li>
+      ))}
+      {events.length === 0 && (
+        <li className="p-4 text-xs text-muted-foreground">No issues detected. Try injecting a duplicate, drop, or latency.</li>
+      )}
+    </ul>
   );
 }
 
-function Pill({
-  children,
-  tone,
-}: {
-  children: React.ReactNode;
-  tone: "info" | "success" | "warning" | "error" | "muted";
-}) {
+function Pill({ children, tone }: { children: React.ReactNode; tone: "info" | "success" | "warning" | "error" | "muted" }) {
   const map: Record<string, string> = {
     info: "border-info/40 text-info bg-info/10",
     success: "border-success/40 text-success bg-success/10",
@@ -744,9 +746,7 @@ function Pill({
     muted: "border-border text-muted-foreground bg-surface",
   };
   return (
-    <span
-      className={`text-[10px] uppercase tracking-wider px-2 py-1 rounded-full border ${map[tone]}`}
-    >
+    <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${map[tone]}`}>
       {children}
     </span>
   );
@@ -760,7 +760,7 @@ function KindBadge({ kind }: { kind: string }) {
     note: "text-accent border-accent/40 bg-accent/10",
   };
   return (
-    <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${map[kind]}`}>
+    <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${map[kind]}`}>
       {kind}
     </span>
   );
@@ -773,394 +773,5 @@ function SeverityDot({ s }: { s: Severity }) {
     info: "bg-info",
     success: "bg-success",
   };
-  return <span className={`inline-block w-2 h-2 rounded-full mt-1 shrink-0 ${map[s]}`} />;
-}
-
-function FaultBtn({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
-        active
-          ? "bg-destructive/20 border-destructive/60 text-destructive"
-          : "border-border text-muted-foreground hover:text-foreground hover:bg-surface-2"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ElementCard({
-  el,
-  queues,
-  databases,
-  onChange,
-  onRemove,
-}: {
-  el: ArchElement;
-  queues: ArchElement[];
-  databases: ArchElement[];
-  onChange: (p: Partial<ArchElement>) => void;
-  onRemove: () => void;
-}) {
-  const meta = TYPE_META[el.type];
-  const bindings = el.bindings ?? [];
-  function setBinding(i: number, patch: Partial<TopicBinding>) {
-    const next = bindings.map((b, idx) => (idx === i ? { ...b, ...patch } : b));
-    onChange({ bindings: next });
-  }
-  function addBinding() {
-    const firstQueue = queues[0]?.id ?? "";
-    onChange({ bindings: [...bindings, { queueId: firstQueue, routingKey: "" }] });
-  }
-  function removeBinding(i: number) {
-    onChange({ bindings: bindings.filter((_, idx) => idx !== i) });
-  }
-  return (
-    <div className="rounded-md border border-border bg-surface-2/60 p-2.5 space-y-2">
-      <div className="flex items-center gap-2">
-        <span
-          className="w-7 h-7 grid place-items-center rounded border border-border font-mono text-sm"
-          style={{ color: meta.color }}
-        >
-          {meta.glyph}
-        </span>
-        <input
-          value={el.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          className="flex-1 bg-transparent text-sm font-medium outline-none min-w-0"
-        />
-        <button
-          onClick={onRemove}
-          className="text-muted-foreground hover:text-destructive text-xs px-1"
-          aria-label="remove"
-        >
-          ✕
-        </button>
-      </div>
-      <div className="flex items-center gap-2">
-        <input
-          value={el.id}
-          onChange={(e) => onChange({ id: e.target.value.replace(/\s+/g, "_").toUpperCase() })}
-          className="mono text-[11px] bg-surface border border-border rounded px-1.5 py-0.5 w-20 outline-none"
-        />
-        <select
-          value={el.type}
-          onChange={(e) => onChange({ type: e.target.value as ElementType })}
-          className="text-[11px] bg-surface border border-border rounded px-1.5 py-0.5 flex-1 outline-none"
-        >
-          {Object.entries(TYPE_META).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      {(el.type === "service" || el.type === "queue") && (
-        <div className="flex flex-wrap gap-1.5">
-          <Toggle on={!!el.idempotent} onChange={(v) => onChange({ idempotent: v })}>
-            idempotent
-          </Toggle>
-          <Toggle on={!!el.hasOutbox} onChange={(v) => onChange({ hasOutbox: v })}>
-            outbox
-          </Toggle>
-          <Toggle on={!!el.hasInbox} onChange={(v) => onChange({ hasInbox: v })}>
-            inbox
-          </Toggle>
-        </div>
-      )}
-      {(el.type === "queue" || el.type === "topic") && (
-        <div className="space-y-1.5 pt-1 border-t border-border/60">
-          <div className="flex items-center gap-2">
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground w-14">
-              broker
-            </label>
-            <select
-              value={el.broker ?? "generic"}
-              onChange={(e) => onChange({ broker: e.target.value as BrokerKind })}
-              className="text-[11px] bg-surface border border-border rounded px-1.5 py-0.5 flex-1 outline-none"
-            >
-              {(["generic", "rabbitmq", "sqs", "sns", "kafka", "eventbridge", "redis-streams", "gcp-pubsub"] as BrokerKind[]).map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
-          </div>
-          {el.type === "queue" && (
-            <div className="grid grid-cols-2 gap-1">
-              {(el.broker === "sqs" || el.broker === "rabbitmq") && (
-                <Toggle on={!!el.fifo} onChange={(v) => onChange({ fifo: v })}>fifo</Toggle>
-              )}
-              {el.broker === "kafka" && (
-                <NumField label="parts" value={el.partitions} onChange={(v) => onChange({ partitions: v })} />
-              )}
-              {(el.broker === "kafka" || el.broker === "gcp-pubsub") && (
-                <TextField label="group" value={el.consumerGroup} onChange={(v) => onChange({ consumerGroup: v })} />
-              )}
-              {(el.broker === "sqs" || el.broker === "rabbitmq") && (
-                <NumField label="vis(s)" value={el.visibilityTimeoutSec} onChange={(v) => onChange({ visibilityTimeoutSec: v })} />
-              )}
-              {el.broker === "sqs" && (
-                <NumField label="maxRx" value={el.maxReceives} onChange={(v) => onChange({ maxReceives: v })} />
-              )}
-              <NumField label="ret(h)" value={el.retentionHours} onChange={(v) => onChange({ retentionHours: v })} />
-              <div className="col-span-2 flex items-center gap-1">
-                <label className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">dlq</label>
-                <select
-                  value={el.dlqId ?? ""}
-                  onChange={(e) => onChange({ dlqId: e.target.value || undefined })}
-                  className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1"
-                >
-                  <option value="">— none —</option>
-                  {queues.filter((q) => q.id !== el.id).map((q) => (
-                    <option key={q.id} value={q.id}>{q.id} · {q.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-          {el.type === "topic" && (
-            <div className="grid grid-cols-2 gap-1">
-              {el.broker === "kafka" && (
-                <>
-                  <NumField label="parts" value={el.partitions} onChange={(v) => onChange({ partitions: v })} />
-                  <Toggle on={!!el.schemaContract} onChange={(v) => onChange({ schemaContract: v })}>schema</Toggle>
-                </>
-              )}
-              {(el.broker === "sns" || el.broker === "eventbridge") && (
-                <div className="col-span-2">
-                  <TextField label="filter" value={el.filterPolicy} onChange={(v) => onChange({ filterPolicy: v })} />
-                </div>
-              )}
-              <NumField label="ret(h)" value={el.retentionHours} onChange={(v) => onChange({ retentionHours: v })} />
-            </div>
-          )}
-        </div>
-      )}
-      {el.type === "topic" && (
-        <div className="space-y-2 pt-1 border-t border-border/60">
-          <div className="flex items-center gap-2">
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              exchange
-            </label>
-            <select
-              value={el.topicKind ?? "fanout"}
-              onChange={(e) => onChange({ topicKind: e.target.value as TopicKind })}
-              className="text-[11px] bg-surface border border-border rounded px-1.5 py-0.5 flex-1 outline-none"
-            >
-              {(["fanout", "direct", "topic", "headers", "pubsub"] as TopicKind[]).map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                bindings ({bindings.length})
-              </span>
-              <button
-                onClick={addBinding}
-                disabled={queues.length === 0}
-                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-primary hover:border-primary/60 disabled:opacity-40"
-              >
-                + bind queue
-              </button>
-            </div>
-            {queues.length === 0 && bindings.length === 0 && (
-              <p className="text-[10px] text-muted-foreground italic">
-                add a queue component first to bind it here.
-              </p>
-            )}
-            {bindings.map((b, i) => (
-              <div key={i} className="flex items-center gap-1">
-                <select
-                  value={b.queueId}
-                  onChange={(e) => setBinding(i, { queueId: e.target.value })}
-                  className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0"
-                >
-                  {queues.map((q) => (
-                    <option key={q.id} value={q.id}>
-                      {q.id} · {q.name}
-                    </option>
-                  ))}
-                </select>
-                {(el.topicKind === "direct" ||
-                  el.topicKind === "topic" ||
-                  el.topicKind === "headers" ||
-                  el.topicKind == null) && (
-                  <input
-                    value={b.routingKey ?? ""}
-                    onChange={(e) => setBinding(i, { routingKey: e.target.value })}
-                    placeholder={el.topicKind === "topic" ? "order.*" : "key"}
-                    className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-24"
-                  />
-                )}
-                <button
-                  onClick={() => removeBinding(i)}
-                  className="text-muted-foreground hover:text-destructive text-[10px] px-1"
-                  aria-label="remove binding"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {el.type === "service" && (
-        <div className="space-y-1 pt-1 border-t border-border/60">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              data stores ({el.dataStores?.length ?? 0})
-            </span>
-            <button
-              onClick={() => {
-                const first = databases.find((d) => !el.dataStores?.includes(d.id));
-                if (!first) return;
-                onChange({ dataStores: [...(el.dataStores ?? []), first.id] });
-              }}
-              disabled={databases.length === 0 || (el.dataStores?.length ?? 0) >= databases.length}
-              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-info hover:border-info/60 disabled:opacity-40"
-            >
-              + bind store
-            </button>
-          </div>
-          {databases.length === 0 && (
-            <p className="text-[10px] text-muted-foreground italic">
-              add a database or cache to bind it.
-            </p>
-          )}
-          {(el.dataStores ?? []).map((dsId, i) => (
-            <div key={`${dsId}-${i}`} className="flex items-center gap-1">
-              <select
-                value={dsId}
-                onChange={(e) => {
-                  const next = [...(el.dataStores ?? [])];
-                  next[i] = e.target.value;
-                  onChange({ dataStores: next });
-                }}
-                className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0"
-              >
-                {databases.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.id} · {d.name} ({d.type})
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() =>
-                  onChange({ dataStores: (el.dataStores ?? []).filter((_, idx) => idx !== i) })
-                }
-                className="text-muted-foreground hover:text-destructive text-[10px] px-1"
-                aria-label="unbind"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NumField({ label, value, onChange }: { label: string; value?: number; onChange: (v: number | undefined) => void }) {
-  return (
-    <label className="flex items-center gap-1">
-      <span className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">{label}</span>
-      <input
-        type="number"
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-        className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-full min-w-0"
-      />
-    </label>
-  );
-}
-
-function TextField({ label, value, onChange }: { label: string; value?: string; onChange: (v: string | undefined) => void }) {
-  return (
-    <label className="flex items-center gap-1">
-      <span className="text-[9px] uppercase tracking-wider text-muted-foreground w-10">{label}</span>
-      <input
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value || undefined)}
-        className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-full min-w-0"
-      />
-    </label>
-  );
-}
-
-function Toggle({
-  on,
-  onChange,
-  children,
-}: {
-  on: boolean;
-  onChange: (v: boolean) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={() => onChange(!on)}
-      className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
-        on
-          ? "bg-primary/15 border-primary/50 text-primary"
-          : "border-border text-muted-foreground hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function buildArchDiagram(
-  elements: ArchElement[],
-  steps: { from?: string; to?: string; kind: string }[],
-) {
-  const lines: string[] = ["flowchart LR"];
-  const shape: Record<ElementType, (id: string, label: string) => string> = {
-    service: (id, l) => `${id}(["${l}"])`,
-    database: (id, l) => `${id}[("${l}")]`,
-    queue: (id, l) => `${id}[/"${l}"/]`,
-    topic: (id, l) => `${id}{{"${l}"}}`,
-    cache: (id, l) => `${id}[\\"${l}"\\]`,
-    external: (id, l) => `${id}(("${l}"))`,
-    "api-gateway": (id, l) => `${id}>"${l}"]`,
-    lambda: (id, l) => `${id}(["${l}"])`,
-    scheduler: (id, l) => `${id}{{"${l}"}}`,
-    stream: (id, l) => `${id}[/"${l}"\\]`,
-    saga: (id, l) => `${id}(["${l}"])`,
-  };
-  for (const e of elements) {
-    const tags = [
-      e.hasOutbox ? "outbox" : null,
-      e.hasInbox ? "inbox" : null,
-      e.idempotent ? "idem" : null,
-    ]
-      .filter(Boolean)
-      .join("·");
-    const label = tags ? `${e.name}\\n[${tags}]` : e.name;
-    lines.push("  " + shape[e.type](e.id, label));
-  }
-  const seen = new Set<string>();
-  for (const s of steps) {
-    if (!s.from || !s.to) continue;
-    const key = `${s.from}|${s.to}|${s.kind}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const arrow = s.kind === "async" ? "-.->|async|" : s.kind === "response" ? "-.->" : "-->";
-    lines.push(`  ${s.from} ${arrow} ${s.to}`);
-  }
-  return lines.join("\n");
+  return <span className={`inline-block w-2 h-2 rounded-full mt-1.5 shrink-0 ${map[s]}`} />;
 }

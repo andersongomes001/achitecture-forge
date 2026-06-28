@@ -9,16 +9,12 @@ export type ElementType =
   | "lambda"
   | "scheduler"
   | "stream"
-  | "saga";
+  | "saga"
+  | "relay"
+  | "inbox-store";
 
 export type TopicKind = "fanout" | "direct" | "topic" | "headers" | "pubsub";
 
-/**
- * Concrete messaging broker. Drives which broker-specific fields are
- * shown/applied and the warnings emitted by the simulator (e.g. SQS FIFO
- * requires a MessageGroupId, Kafka ordering is per-partition, SNS without
- * subscription filter fans out everything, etc.).
- */
 export type BrokerKind =
   | "generic"
   | "rabbitmq"
@@ -29,46 +25,101 @@ export type BrokerKind =
   | "redis-streams"
   | "gcp-pubsub";
 
+export type DbEngine =
+  | "generic"
+  | "postgres"
+  | "mysql"
+  | "mongodb"
+  | "dynamodb"
+  | "cassandra"
+  | "redis"
+  | "elasticsearch"
+  | "clickhouse";
+
 export interface TopicBinding {
-  queueId: string; // ArchElement.id of a queue
+  queueId: string;
   routingKey?: string;
-  /** SNS-style attribute filter or EventBridge pattern (free-form text). */
   filter?: string;
+  contractId?: string;
 }
 
 export interface ArchElement {
-  id: string; // short alias used in sequence diagram (e.g. "API")
+  id: string;
   name: string;
   type: ElementType;
   idempotent?: boolean;
   hasOutbox?: boolean;
   hasInbox?: boolean;
+
   // topic-only
   topicKind?: TopicKind;
   bindings?: TopicBinding[];
-  // service-only: owned databases / caches
-  dataStores?: string[]; // ArchElement.id list
 
-  // ───── broker-specific (queue or topic) ─────
+  // service-only
+  dataStores?: string[];
+  circuitBreaker?: boolean;
+  retryPolicy?: "none" | "linear" | "exponential";
+  /** auto-derived relay/inbox attachments live as separate elements; these point back. */
+  outboxRelayId?: string;
+  inboxStoreId?: string;
+
+  // broker-specific (queue or topic)
   broker?: BrokerKind;
-  /** SQS/RabbitMQ FIFO ordering. */
   fifo?: boolean;
-  /** Kafka partitions or SQS message-group hint. */
   partitions?: number;
-  /** Consumer group / subscription name (Kafka, PubSub). */
   consumerGroup?: string;
-  /** Visibility timeout in seconds (SQS, RabbitMQ ack timeout). */
   visibilityTimeoutSec?: number;
-  /** Max receives before DLQ (SQS redrive). */
   maxReceives?: number;
-  /** Bound DLQ — references another queue element id. */
   dlqId?: string;
-  /** Message retention in hours. */
+  retryQueueId?: string;
+  retryDelayMs?: number;
   retentionHours?: number;
-  /** SNS subscription filter / EventBridge pattern. */
   filterPolicy?: string;
-  /** Kafka — has a schema registry contract. */
   schemaContract?: boolean;
+
+  // RabbitMQ realism
+  rabbitDurable?: boolean;
+  rabbitTtlMs?: number;
+  rabbitMaxLength?: number;
+  rabbitDlx?: string;        // dead-letter exchange name
+  rabbitDlrk?: string;       // dead-letter routing key
+  prefetch?: number;
+
+  // Kafka realism
+  replicationFactor?: number;
+  minInSyncReplicas?: number;
+  cleanupPolicy?: "delete" | "compact";
+
+  // Roles when auto-created
+  isRelayFor?: string;       // service id that owns this relay
+  isInboxFor?: string;       // service id that owns this inbox
+  isRetryFor?: string;       // queue id that owns this retry queue
+  isDlqFor?: string;         // queue id that owns this dlq
+  isReplicaOf?: string;      // db id this is a replica of
+
+  // database-specific
+  dbEngine?: DbEngine;
+  dbReplicas?: number;
+  dbConsistency?: "eventual" | "strong" | "quorum" | "one" | "all";
+  dbWriteConcern?: string;   // mongo: "1" | "majority"
+  dbReadPreference?: string; // mongo: "primary" | "secondary"
+  dbMode?: string;           // redis: standalone/cluster/sentinel
+  dbPersistence?: string;    // redis: none/AOF/RDB
+  dbPartitionKey?: string;   // dynamodb
+  dbShards?: number;         // elasticsearch
+  dbIsolation?: string;      // sql isolation level
+
+  // contract attached at the element level (topic/queue produce/consume contract)
+  contractId?: string;
+}
+
+export interface Contract {
+  id: string;
+  name: string;
+  version: string;
+  producerId?: string;
+  consumerIds?: string[];
+  schema?: string; // free-form (JSON, Avro, proto) text
 }
 
 export type StepKind = "sync" | "async" | "response" | "note";
@@ -80,18 +131,36 @@ export interface SeqStep {
   from?: string;
   to?: string;
   label: string;
+  contractId?: string;
 }
 
 export type Severity = "error" | "warning" | "info" | "success";
+
+export type RemediationKind =
+  | "addOutbox"
+  | "addInbox"
+  | "makeIdempotent"
+  | "addDlq"
+  | "addRetry"
+  | "convertAsync"
+  | "addContract"
+  | "addCircuitBreaker";
+
+export interface RemediationAction {
+  kind: RemediationKind;
+  targetId: string;          // element id (or step index encoded as string)
+  label: string;
+}
 
 export interface SimEvent {
   stepIndex: number;
   severity: Severity;
   message: string;
   detail?: string;
+  suggestions?: RemediationAction[];
 }
 
-export type FaultKind = "duplicate" | "drop" | "reorder";
+export type FaultKind = "duplicate" | "drop" | "reorder" | "latency";
 
 export interface Fault {
   stepIndex: number;
