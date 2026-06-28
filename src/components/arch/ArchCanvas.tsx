@@ -93,6 +93,7 @@ const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: str
   scheduler: { glyph: "⏱", color: "var(--color-info)", label: "Scheduler" },
   stream: { glyph: "⌇", color: "var(--color-warning)", label: "Stream" },
   saga: { glyph: "⎈", color: "var(--color-success)", label: "Saga" },
+  broker: { glyph: "⬡", color: "var(--color-accent)", label: "Broker" },
   relay: { glyph: "↻", color: "var(--color-info)", label: "Outbox Relay" },
   "inbox-store": { glyph: "▤", color: "var(--color-success)", label: "Inbox Store" },
 };
