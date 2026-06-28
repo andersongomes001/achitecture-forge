@@ -277,6 +277,20 @@ function ForgePage() {
           out.push({ id: `mng:owns:${el.id}->${dsId}`, source: el.id, target: dsId, kind: "owns", label: "owns" });
         }
       }
+      // stateless direct publishers (service publishes straight to a destination, no outbox)
+      if ((el.type === "service" || el.type === "lambda" || el.type === "saga" || el.type === "stream") && el.publishesTo?.length) {
+        for (const tId of el.publishesTo) {
+          if (!ids.has(tId)) continue;
+          out.push({ id: `mng:publish:${el.id}->${tId}`, source: el.id, target: tId, kind: "publish", label: "publish" });
+        }
+      }
+      // stateless direct consumers (service consumes straight from a source, no inbox)
+      if ((el.type === "service" || el.type === "lambda" || el.type === "saga" || el.type === "stream") && el.consumesFrom?.length) {
+        for (const sId of el.consumesFrom) {
+          if (!ids.has(sId)) continue;
+          out.push({ id: `mng:subscribe:${sId}->${el.id}`, source: sId, target: el.id, kind: "subscribe", label: "consume" });
+        }
+      }
       if (el.type === "queue" && el.dlqId && ids.has(el.dlqId)) {
         out.push({ id: `mng:dlq:${el.id}->${el.dlqId}`, source: el.id, target: el.dlqId, kind: "dlq",
           label: `DLQ${el.maxReceives ? ` · max ${el.maxReceives}` : ""}` });
