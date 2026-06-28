@@ -580,6 +580,8 @@ export function Inspector(props: Props) {
               )}
               <p className="text-[9.5px] text-muted-foreground">Validated in the Load tab: utilization, overload and queue backlog growth.</p>
             </Section>
+          )}
+
 
           <div className="pt-2 border-t border-border">
             <button onClick={props.onRemove}
