@@ -326,6 +326,31 @@ export function Inspector(props: Props) {
             </Section>
           )}
 
+          {element.type === "broker" && (
+            <Section title="Messaging system">
+              <Row label="system">
+                <select
+                  value={element.broker ?? "rabbitmq"}
+                  onChange={(e) => props.onChange({ broker: e.target.value as BrokerKind })}
+                  className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                >
+                  {(["rabbitmq", "sqs", "sns", "kafka", "eventbridge", "redis-streams", "gcp-pubsub", "generic"] as BrokerKind[]).map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </Row>
+              <p className="text-[9.5px] text-muted-foreground">
+                A broker groups its topics & queues. Attach destinations via their “hosted by” field.
+              </p>
+              <div className="text-[10px] text-muted-foreground mono space-y-0.5">
+                {elements.filter((e) => e.brokerId === element.id).map((e) => (
+                  <div key={e.id}>• {e.id} · {e.type}</div>
+                ))}
+                {elements.filter((e) => e.brokerId === element.id).length === 0 && <div className="italic">no destinations attached</div>}
+              </div>
+            </Section>
+          )}
+
           {(element.type === "queue" || element.type === "topic") && (
             <Section title="Broker">
               <Row label="broker">
@@ -336,6 +361,18 @@ export function Inspector(props: Props) {
                 >
                   {(["generic", "rabbitmq", "sqs", "sns", "kafka", "eventbridge", "redis-streams", "gcp-pubsub"] as BrokerKind[]).map((b) => (
                     <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </Row>
+              <Row label="hosted by">
+                <select
+                  value={element.brokerId ?? ""}
+                  onChange={(e) => props.onChange({ brokerId: e.target.value || undefined })}
+                  className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                >
+                  <option value="">— standalone —</option>
+                  {elements.filter((e) => e.type === "broker").map((e) => (
+                    <option key={e.id} value={e.id}>{e.id} · {e.broker}</option>
                   ))}
                 </select>
               </Row>
