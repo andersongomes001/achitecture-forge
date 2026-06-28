@@ -72,6 +72,8 @@ export interface ArchElement {
 
   // broker-specific (queue or topic)
   broker?: BrokerKind;
+  /** topic/queue: id of a broker element that hosts this destination. */
+  brokerId?: string;
   fifo?: boolean;
   partitions?: number;
   consumerGroup?: string;
