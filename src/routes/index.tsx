@@ -325,6 +325,7 @@ function ForgePage() {
     const extra: Partial<ArchElement> =
       type === "topic" ? { topicKind: "fanout", bindings: [], broker: "generic" }
       : type === "queue" ? { broker: "generic" }
+      : type === "broker" ? { broker: "rabbitmq" }
       : type === "database" ? { dbEngine: "generic" }
       : {};
     const meta = TYPE_GLYPH[type];
