@@ -670,7 +670,7 @@ function ForgePage() {
                   </div>
                 )}
                 {drawerTab === "load" && (
-                  <LoadView load={load} onPatch={patchEl} />
+                  <LoadView load={load} />
                 )}
               </div>
             )}
