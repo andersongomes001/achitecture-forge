@@ -116,12 +116,63 @@ export function Inspector(props: Props) {
                 label="Outbox pattern"
                 hint="Auto-creates an Outbox Relay sibling"
               />
+              {element.hasOutbox && (
+                <div className="ml-1 pl-2 border-l border-accent/40 space-y-1.5">
+                  <Row label="publishes to">
+                    <select
+                      value={element.outboxTargetId ?? ""}
+                      onChange={(e) => props.onChange({ outboxTargetId: e.target.value || undefined })}
+                      className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                    >
+                      <option value="">— pick topic / queue / broker —</option>
+                      {destinations.map((d) => (
+                        <option key={d.id} value={d.id}>{d.id} · {d.type}</option>
+                      ))}
+                    </select>
+                  </Row>
+                  {!element.outboxTargetId && (
+                    <p className="text-[9.5px] text-warning">Relay has no destination — pick where events are published.</p>
+                  )}
+                </div>
+              )}
               <ToggleRow
                 on={!!element.hasInbox}
                 onChange={(v) => props.onSetInbox(v)}
                 label="Inbox / dedup"
                 hint="Auto-creates an Inbox Store sibling"
               />
+              {element.hasInbox && (
+                <div className="ml-1 pl-2 border-l border-success/40 space-y-1.5">
+                  <Row label="consumes from">
+                    <select
+                      value={element.inboxSourceId ?? ""}
+                      onChange={(e) => props.onChange({ inboxSourceId: e.target.value || undefined })}
+                      className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                    >
+                      <option value="">— pick topic / queue / broker —</option>
+                      {destinations.map((d) => (
+                        <option key={d.id} value={d.id}>{d.id} · {d.type}</option>
+                      ))}
+                    </select>
+                  </Row>
+                  <Row label="dedup db">
+                    <select
+                      value={element.inboxDbId ?? ""}
+                      onChange={(e) => props.onChange({ inboxDbId: e.target.value || undefined })}
+                      className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                    >
+                      <option value="">— same db, distinct table —</option>
+                      {(ownedDbs.length ? ownedDbs : dbs).map((d) => (
+                        <option key={d.id} value={d.id}>{d.id} · {d.dbEngine ?? d.type}</option>
+                      ))}
+                    </select>
+                  </Row>
+                  <p className="text-[9.5px] text-muted-foreground">Inbox table can live in the same database bound to the outbox — just a separate table.</p>
+                  {!element.inboxSourceId && (
+                    <p className="text-[9.5px] text-warning">Inbox has no source — pick where messages arrive.</p>
+                  )}
+                </div>
+              )}
               <ToggleRow
                 on={!!element.circuitBreaker}
                 onChange={(v) => props.onChange({ circuitBreaker: v })}
