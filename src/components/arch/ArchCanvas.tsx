@@ -40,6 +40,9 @@ export type EdgeKind =
   | "replica"
   | "relay-read"
   | "relay-publish"
+  | "consume"
+  | "broker-of"
+  | "inbox-table"
   | "inbox-of";
 
 export interface CanvasEdgeData {
@@ -90,6 +93,7 @@ const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: str
   scheduler: { glyph: "⏱", color: "var(--color-info)", label: "Scheduler" },
   stream: { glyph: "⌇", color: "var(--color-warning)", label: "Stream" },
   saga: { glyph: "⎈", color: "var(--color-success)", label: "Saga" },
+  broker: { glyph: "⬡", color: "var(--color-accent)", label: "Broker" },
   relay: { glyph: "↻", color: "var(--color-info)", label: "Outbox Relay" },
   "inbox-store": { glyph: "▤", color: "var(--color-success)", label: "Inbox Store" },
 };
@@ -238,6 +242,9 @@ const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?:
   replica: { stroke: "var(--color-info)", dasharray: "1 3", width: 1 },
   "relay-read": { stroke: "var(--color-info)", dasharray: "3 2", width: 1.4 },
   "relay-publish": { stroke: "var(--color-accent)", dasharray: "5 2", width: 1.6 },
+  consume: { stroke: "var(--color-success)", dasharray: "5 2", width: 1.6 },
+  "broker-of": { stroke: "var(--color-accent)", dasharray: "1 3", width: 1 },
+  "inbox-table": { stroke: "var(--color-success)", dasharray: "3 3", width: 1.2 },
   "inbox-of": { stroke: "var(--color-success)", dasharray: "2 4", width: 1.2 },
 };
 

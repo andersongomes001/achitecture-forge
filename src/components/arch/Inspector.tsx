@@ -48,6 +48,14 @@ export function Inspector(props: Props) {
   const meta = TYPE_GLYPH[element.type];
   const queues = elements.filter((e) => e.type === "queue" && e.id !== element.id);
   const dbs = elements.filter((e) => e.type === "database" || e.type === "cache");
+  // messaging destinations the outbox can publish to / the inbox can consume from
+  const destinations = elements.filter(
+    (e) => (e.type === "topic" || e.type === "queue" || e.type === "broker") && e.id !== element.id,
+  );
+  // databases owned by this service (preferred host for the inbox dedup table)
+  const ownedDbs = (element.dataStores ?? [])
+    .map((id) => elements.find((e) => e.id === id))
+    .filter((e): e is ArchElement => !!e && (e.type === "database" || e.type === "cache"));
 
   return (
     <Shell
@@ -108,12 +116,63 @@ export function Inspector(props: Props) {
                 label="Outbox pattern"
                 hint="Auto-creates an Outbox Relay sibling"
               />
+              {element.hasOutbox && (
+                <div className="ml-1 pl-2 border-l border-accent/40 space-y-1.5">
+                  <Row label="publishes to">
+                    <select
+                      value={element.outboxTargetId ?? ""}
+                      onChange={(e) => props.onChange({ outboxTargetId: e.target.value || undefined })}
+                      className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                    >
+                      <option value="">— pick topic / queue / broker —</option>
+                      {destinations.map((d) => (
+                        <option key={d.id} value={d.id}>{d.id} · {d.type}</option>
+                      ))}
+                    </select>
+                  </Row>
+                  {!element.outboxTargetId && (
+                    <p className="text-[9.5px] text-warning">Relay has no destination — pick where events are published.</p>
+                  )}
+                </div>
+              )}
               <ToggleRow
                 on={!!element.hasInbox}
                 onChange={(v) => props.onSetInbox(v)}
                 label="Inbox / dedup"
                 hint="Auto-creates an Inbox Store sibling"
               />
+              {element.hasInbox && (
+                <div className="ml-1 pl-2 border-l border-success/40 space-y-1.5">
+                  <Row label="consumes from">
+                    <select
+                      value={element.inboxSourceId ?? ""}
+                      onChange={(e) => props.onChange({ inboxSourceId: e.target.value || undefined })}
+                      className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                    >
+                      <option value="">— pick topic / queue / broker —</option>
+                      {destinations.map((d) => (
+                        <option key={d.id} value={d.id}>{d.id} · {d.type}</option>
+                      ))}
+                    </select>
+                  </Row>
+                  <Row label="dedup db">
+                    <select
+                      value={element.inboxDbId ?? ""}
+                      onChange={(e) => props.onChange({ inboxDbId: e.target.value || undefined })}
+                      className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                    >
+                      <option value="">— same db, distinct table —</option>
+                      {(ownedDbs.length ? ownedDbs : dbs).map((d) => (
+                        <option key={d.id} value={d.id}>{d.id} · {d.dbEngine ?? d.type}</option>
+                      ))}
+                    </select>
+                  </Row>
+                  <p className="text-[9.5px] text-muted-foreground">Inbox table can live in the same database bound to the outbox — just a separate table.</p>
+                  {!element.inboxSourceId && (
+                    <p className="text-[9.5px] text-warning">Inbox has no source — pick where messages arrive.</p>
+                  )}
+                </div>
+              )}
               <ToggleRow
                 on={!!element.circuitBreaker}
                 onChange={(v) => props.onChange({ circuitBreaker: v })}
@@ -267,6 +326,31 @@ export function Inspector(props: Props) {
             </Section>
           )}
 
+          {element.type === "broker" && (
+            <Section title="Messaging system">
+              <Row label="system">
+                <select
+                  value={element.broker ?? "rabbitmq"}
+                  onChange={(e) => props.onChange({ broker: e.target.value as BrokerKind })}
+                  className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                >
+                  {(["rabbitmq", "sqs", "sns", "kafka", "eventbridge", "redis-streams", "gcp-pubsub", "generic"] as BrokerKind[]).map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </Row>
+              <p className="text-[9.5px] text-muted-foreground">
+                A broker groups its topics & queues. Attach destinations via their “hosted by” field.
+              </p>
+              <div className="text-[10px] text-muted-foreground mono space-y-0.5">
+                {elements.filter((e) => e.brokerId === element.id).map((e) => (
+                  <div key={e.id}>• {e.id} · {e.type}</div>
+                ))}
+                {elements.filter((e) => e.brokerId === element.id).length === 0 && <div className="italic">no destinations attached</div>}
+              </div>
+            </Section>
+          )}
+
           {(element.type === "queue" || element.type === "topic") && (
             <Section title="Broker">
               <Row label="broker">
@@ -277,6 +361,18 @@ export function Inspector(props: Props) {
                 >
                   {(["generic", "rabbitmq", "sqs", "sns", "kafka", "eventbridge", "redis-streams", "gcp-pubsub"] as BrokerKind[]).map((b) => (
                     <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </Row>
+              <Row label="hosted by">
+                <select
+                  value={element.brokerId ?? ""}
+                  onChange={(e) => props.onChange({ brokerId: e.target.value || undefined })}
+                  className="text-[11px] bg-surface border border-border rounded px-2 py-1 flex-1 outline-none"
+                >
+                  <option value="">— standalone —</option>
+                  {elements.filter((e) => e.type === "broker").map((e) => (
+                    <option key={e.id} value={e.id}>{e.id} · {e.broker}</option>
                   ))}
                 </select>
               </Row>
