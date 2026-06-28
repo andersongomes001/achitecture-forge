@@ -529,6 +529,36 @@ export function Inspector(props: Props) {
             </Section>
           )}
 
+          {(element.type === "service" || element.type === "lambda" || element.type === "saga" || element.type === "stream") && (
+            <Section title="Direct messaging (stateless)">
+              <p className="text-[9.5px] text-muted-foreground">
+                For services without outbox/inbox: publish to and consume directly from topics, queues or brokers.
+              </p>
+              <div className="space-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-accent">publishes to</span>
+                <TargetListEditor
+                  ids={element.publishesTo ?? []}
+                  options={destinations}
+                  addLabel="+ publisher"
+                  onChange={(ids) => props.onChange({ publishesTo: ids })}
+                />
+              </div>
+              <div className="space-y-1 pt-1">
+                <span className="text-[10px] uppercase tracking-wider text-success">consumes from</span>
+                <TargetListEditor
+                  ids={element.consumesFrom ?? []}
+                  options={destinations}
+                  addLabel="+ consumer"
+                  onChange={(ids) => props.onChange({ consumesFrom: ids })}
+                />
+                {(element.consumesFrom?.length ?? 0) > 0 && !element.idempotent && !element.hasInbox && (
+                  <p className="text-[9.5px] text-warning">Consuming without idempotency/inbox — duplicate deliveries may double-process.</p>
+                )}
+              </div>
+            </Section>
+          )}
+
+
           <Section title="Contract">
             <Row label="contract">
               <select
@@ -731,6 +761,35 @@ function BindingsEditor({
               className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none w-24" />
           )}
           <button onClick={() => onChange(bindings.filter((_, idx) => idx !== i))}
+            className="text-muted-foreground hover:text-destructive text-[10px] px-1">✕</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TargetListEditor({
+  ids, options, addLabel, onChange,
+}: { ids: string[]; options: ArchElement[]; addLabel: string; onChange: (ids: string[]) => void }) {
+  return (
+    <div className="space-y-1">
+      <button onClick={() => {
+        const first = options.find((d) => !ids.includes(d.id));
+        if (first) onChange([...ids, first.id]);
+      }}
+        disabled={options.length === 0 || ids.length >= options.length}
+        className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border hover:text-info hover:border-info/60 disabled:opacity-40">
+        {addLabel}
+      </button>
+      {ids.map((id, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <select value={id} onChange={(e) => {
+            const next = [...ids]; next[i] = e.target.value; onChange(next);
+          }}
+            className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0">
+            {options.map((d) => <option key={d.id} value={d.id}>{d.id} · {d.type}</option>)}
+          </select>
+          <button onClick={() => onChange(ids.filter((_, idx) => idx !== i))}
             className="text-muted-foreground hover:text-destructive text-[10px] px-1">✕</button>
         </div>
       ))}

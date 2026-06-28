@@ -58,6 +58,10 @@ export interface ArchElement {
 
   // service-only
   dataStores?: string[];
+  /** stateless direct publish targets (topic / queue / broker ids) — no outbox. */
+  publishesTo?: string[];
+  /** stateless direct consume sources (topic / queue / broker ids) — no inbox. */
+  consumesFrom?: string[];
   circuitBreaker?: boolean;
   retryPolicy?: "none" | "linear" | "exponential";
   /** auto-derived relay/inbox attachments live as separate elements; these point back. */
