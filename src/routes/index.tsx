@@ -702,6 +702,38 @@ function ForgePage() {
 
 /* ------- subcomponents ------- */
 
+const GUIDE_STEPS: { title: string; body: string }[] = [
+  { title: "1 · Modele a arquitetura", body: "Arraste componentes da paleta (clique em › para expandir os nomes) e conecte-os no canvas. Componentes órfãos mostram um X até serem ligados." },
+  { title: "2 · Configure os detalhes", body: "Selecione um componente para abrir o inspector: brokers, DBs (réplicas/sharding), outbox/inbox, contratos e capacidade." },
+  { title: "3 · Ajuste as linhas", body: "Arraste o ponto central de qualquer linha para roteá-la fora dos componentes. Dê duplo-clique para resetar. A legenda explica cores e estilos." },
+  { title: "4 · Gere o diagrama de sequência", body: "Use 'Generate from canvas' para criar um diagrama Mermaid a partir dos componentes e conexões. Edite na aba Sequences." },
+  { title: "5 · Rode múltiplos cenários", body: "Crie vários diagramas de sequência (+ new) para testar fluxos diferentes sobre a mesma arquitetura. Cada um roda de forma independente." },
+  { title: "6 · Teste e valide", body: "Use o player (▶) para ver o dado trafegando passo a passo. Findings mostra riscos (dual-write, dedup, etc.) com remediações de 1 clique." },
+  { title: "7 · Valide carga", body: "Na aba Load, defina RPS oferecido e capacidade por instância (ou drain rate de filas) para detectar sobrecarga e crescimento de backlog." },
+];
+
+function GuideModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-lg shadow-2xl max-w-lg w-full max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-surface">
+          <h2 className="text-sm font-semibold">Como usar o Forge</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+        </div>
+        <ol className="p-4 space-y-3">
+          {GUIDE_STEPS.map((s) => (
+            <li key={s.title}>
+              <div className="text-xs font-semibold text-primary">{s.title}</div>
+              <div className="text-[12px] text-muted-foreground leading-relaxed">{s.body}</div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+
 function Palette({ onAdd, expanded, onToggle }: { onAdd: (t: ElementType) => void; expanded: boolean; onToggle: () => void }) {
   return (
     <aside className={`${expanded ? "w-44" : "w-16"} shrink-0 border-r border-border bg-surface/70 backdrop-blur flex flex-col py-2 gap-1.5 overflow-y-auto transition-all`}>
