@@ -375,6 +375,9 @@ function InnerCanvas({
 }: Props) {
   const positionsRef = useRef(state.positions);
   positionsRef.current = state.positions;
+  const edgeOffsets = state.edgeOffsets ?? {};
+  const offsetsRef = useRef(edgeOffsets);
+  offsetsRef.current = edgeOffsets;
 
   const initialNodes: Node[] = useMemo(
     () =>
