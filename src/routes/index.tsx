@@ -176,6 +176,12 @@ function uid() {
   return Math.random().toString(36).slice(2, 7).toUpperCase();
 }
 
+interface Scenario {
+  id: string;
+  name: string;
+  seq: string;
+}
+
 function ForgePage() {
   const [elements, setElementsRaw] = useState<ArchElement[]>(DEFAULT_ELEMENTS);
   const [scenarios, setScenarios] = useState<Scenario[]>([
