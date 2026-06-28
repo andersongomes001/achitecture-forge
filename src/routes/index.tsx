@@ -115,7 +115,7 @@ const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   kafkaStream: {
     elements: [
       { id: "GW", name: "API Gateway", type: "api-gateway" },
-      { id: "API", name: "Ingest Svc", type: "service", hasOutbox: true, dataStores: ["DB"], outboxRelayId: "RELAY", circuitBreaker: true },
+      { id: "API", name: "Ingest Svc", type: "service", hasOutbox: true, dataStores: ["DB"], outboxRelayId: "RELAY", outboxTargetId: "KAFKA", circuitBreaker: true },
       { id: "DB", name: "Ingest DB", type: "database", dbEngine: "postgres", dbReplicas: 1 },
       { id: "RELAY", name: "Outbox Relay", type: "relay", isRelayFor: "API" },
       { id: "KAFKA", name: "events", type: "topic", topicKind: "pubsub", broker: "kafka",
