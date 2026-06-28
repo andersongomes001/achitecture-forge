@@ -55,6 +55,8 @@ export interface CanvasEdgeData {
   label?: string;
   managed?: boolean;
   failed?: boolean;
+  offset?: { x: number; y: number };
+  onOffset?: (id: string, offset: { x: number; y: number }) => void;
   [key: string]: unknown;
 }
 
