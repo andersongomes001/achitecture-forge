@@ -494,15 +494,20 @@ function InnerCanvas({
         : { sourceHandle: "r-s", targetHandle: "l-t" };
       return {
         ...e,
-        type: "smoothstep",
+        type: "editable",
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
         animated: true,
         label,
-        labelStyle: { fill: "var(--color-foreground)", fontSize: 10, fontFamily: "var(--font-mono)" },
-        labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.85 },
-        labelBgPadding: [4, 2] as [number, number],
-        labelBgBorderRadius: 3,
+        labelStyle: { color: "var(--color-foreground)" },
+        data: {
+          ...(e.data as object),
+          kind,
+          label,
+          managed,
+          offset: edgeOffsets[e.id],
+          onOffset: updateOffset,
+        },
         style: {
           stroke: failed ? "var(--color-destructive)" : active ? "var(--color-accent)" : style.stroke,
           strokeWidth: failed ? 3 : active ? 2.8 : style.width ?? 1.6,
@@ -516,7 +521,7 @@ function InnerCanvas({
         },
       } as Edge;
     });
-  }, [edges, managedEdges, activeEdgeKeys, failedEdgeKeys, nodePos]);
+  }, [edges, managedEdges, activeEdgeKeys, failedEdgeKeys, nodePos, edgeOffsets, updateOffset]);
 
   function emitState(nextNodes: Node[], nextEdges: Edge[]) {
     const positions: Record<string, XYPosition> = {};
@@ -529,6 +534,7 @@ function InnerCanvas({
         target: e.target,
         kind: ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as EdgeKind,
       })),
+      edgeOffsets: offsetsRef.current,
     });
   }
 
