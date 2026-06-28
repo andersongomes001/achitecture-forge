@@ -84,10 +84,9 @@ export function Inspector(props: Props) {
             />
           </Row>
           <Row label="id">
-            <input
+            <IdField
               value={element.id}
-              onChange={(e) => props.onChange({ id: e.target.value.replace(/\s+/g, "_").toUpperCase() })}
-              className="mono text-[11px] bg-surface border border-border rounded px-2 py-1 outline-none flex-1"
+              onCommit={(v) => props.onChange({ id: v })}
             />
           </Row>
           <Row label="type">
