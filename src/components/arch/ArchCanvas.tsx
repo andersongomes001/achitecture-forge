@@ -258,7 +258,90 @@ const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?:
 
 const CYCLABLE: ReadonlySet<EdgeKind> = new Set(["sync", "async", "response"]);
 
-/** Pick best source/target handle sides based on relative node centers. */
+/** Curved edge whose midpoint can be dragged to route lines around nodes. */
+function EditableEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  markerEnd,
+  style,
+  data,
+  label,
+  labelStyle,
+}: EdgeProps) {
+  const { screenToFlowPosition } = useReactFlow();
+  const d = data as CanvasEdgeData | undefined;
+  const off = d?.offset ?? { x: 0, y: 0 };
+  const cx = (sourceX + targetX) / 2;
+  const cy = (sourceY + targetY) / 2;
+  const midX = cx + off.x;
+  const midY = cy + off.y;
+  const ctrlX = cx + 2 * off.x;
+  const ctrlY = cy + 2 * off.y;
+  const path = `M ${sourceX},${sourceY} Q ${ctrlX},${ctrlY} ${targetX},${targetY}`;
+  const dragging = useRef(false);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    dragging.current = true;
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    d?.onOffset?.(id, { x: p.x - cx, y: p.y - cy });
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    dragging.current = false;
+    (e.target as Element).releasePointerCapture?.(e.pointerId);
+  };
+  const reset = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    d?.onOffset?.(id, { x: 0, y: 0 });
+  };
+
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
+      <EdgeLabelRenderer>
+        <div
+          className="nodrag nopan group"
+          style={{
+            position: "absolute",
+            transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
+            pointerEvents: "all",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          {label && (
+            <span
+              style={labelStyle}
+              className="mono text-[10px] px-1 rounded bg-surface/85 border border-border whitespace-nowrap"
+            >
+              {label}
+            </span>
+          )}
+          <span
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onDoubleClick={reset}
+            title="Drag to reroute · double-click to reset"
+            className="block w-2.5 h-2.5 rounded-full border border-background bg-accent/40 opacity-40 hover:opacity-100 hover:scale-150 transition cursor-move"
+          />
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const edgeTypes: EdgeTypes = { editable: EditableEdge };
+
+
 function pickHandles(
   sx: number,
   sy: number,
