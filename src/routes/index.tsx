@@ -366,7 +366,18 @@ function ForgePage() {
   }
 
   function patchEl(id: string, patch: Partial<ArchElement>) {
-    setElements((es) => patchElement(es, id, patch));
+    setElements((es) => {
+      let next = patchElement(es, id, patch);
+      // when a queue is renamed, keep its DLQ / retry queue names in sync
+      if (patch.name !== undefined) {
+        const q = next.find((e) => e.id === id);
+        if (q && q.type === "queue") {
+          if (q.dlqId) next = patchElement(next, q.dlqId, { name: `${patch.name} · DLQ` });
+          if (q.retryQueueId) next = patchElement(next, q.retryQueueId, { name: `${patch.name} · Retry` });
+        }
+      }
+      return next;
+    });
   }
   function removeEl(id: string) {
     setElements((es) => es.filter((e) => e.id !== id));
