@@ -4,7 +4,7 @@ import { Inspector } from "@/components/arch/Inspector";
 import { parseSequence } from "@/lib/arch/parser";
 import { importFromMermaid } from "@/lib/arch/import";
 import { generateMermaid } from "@/lib/arch/generate";
-import { computeLoad, fmtRate, type LoadRow } from "@/lib/arch/load";
+import { computeLoad, fmtRate, type LoadRow, type LoadResult, type LoadStatus } from "@/lib/arch/load";
 import { simulate } from "@/lib/arch/simulator";
 import {
   addDlqFor,
