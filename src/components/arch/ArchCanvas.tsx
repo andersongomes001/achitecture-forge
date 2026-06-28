@@ -649,4 +649,26 @@ export function ArchCanvas(props: Props) {
   );
 }
 
-export { TYPE_GLYPH };
+export { TYPE_GLYPH, EDGE_STYLE };
+
+/** Human-readable legend metadata for edge kinds. */
+export const EDGE_LEGEND: { kind: EdgeKind; label: string }[] = [
+  { kind: "sync", label: "Sync call (->>)" },
+  { kind: "async", label: "Async message (-))" },
+  { kind: "response", label: "Response (-->>)" },
+  { kind: "fanout", label: "Fanout exchange" },
+  { kind: "direct", label: "Direct routing" },
+  { kind: "topic-route", label: "Topic routing key" },
+  { kind: "headers", label: "Headers match" },
+  { kind: "pubsub", label: "Pub/Sub" },
+  { kind: "relay-publish", label: "Outbox relay publish" },
+  { kind: "relay-read", label: "Relay polls outbox" },
+  { kind: "consume", label: "Inbox consume" },
+  { kind: "inbox-of", label: "Inbox dedup" },
+  { kind: "inbox-table", label: "Inbox dedup table" },
+  { kind: "owns", label: "Owns data store" },
+  { kind: "dlq", label: "Dead-letter queue" },
+  { kind: "retry", label: "Retry queue" },
+  { kind: "replica", label: "DB replica" },
+  { kind: "broker-of", label: "Broker hosts" },
+];
