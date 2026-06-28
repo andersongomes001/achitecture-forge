@@ -40,6 +40,9 @@ export type EdgeKind =
   | "replica"
   | "relay-read"
   | "relay-publish"
+  | "consume"
+  | "broker-of"
+  | "inbox-table"
   | "inbox-of";
 
 export interface CanvasEdgeData {
