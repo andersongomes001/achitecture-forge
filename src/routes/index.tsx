@@ -68,12 +68,13 @@ const DEFAULT_SEQ = `sequenceDiagram
 const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   outbox: {
     elements: [
-      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"], outboxRelayId: "RELAY" },
+      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"], outboxRelayId: "RELAY", outboxTargetId: "BUS" },
       { id: "DB", name: "Orders DB", type: "database", dbEngine: "postgres" },
       { id: "RELAY", name: "Outbox Relay", type: "relay", idempotent: true, isRelayFor: "API" },
       { id: "BUS", name: "Events Bus", type: "topic", topicKind: "fanout", broker: "rabbitmq", bindings: [{ queueId: "Q_MAIL" }] },
       { id: "Q_MAIL", name: "Mail Queue", type: "queue", broker: "rabbitmq", hasInbox: true },
-      { id: "MAIL", name: "Email Worker", type: "service", hasInbox: true, idempotent: true },
+      { id: "MAIL", name: "Email Worker", type: "service", hasInbox: true, idempotent: true, inboxSourceId: "Q_MAIL", inboxStoreId: "MAIL_INBOX" },
+      { id: "MAIL_INBOX", name: "Email Worker · Inbox", type: "inbox-store", isInboxFor: "MAIL" },
     ],
     seq: `sequenceDiagram
   autonumber
