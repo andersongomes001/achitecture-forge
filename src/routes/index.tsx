@@ -227,6 +227,8 @@ function ForgePage() {
     () => simulate({ elements, steps: parsed.steps, faults, contracts }),
     [elements, parsed.steps, faults, contracts],
   );
+  const load = useMemo(() => computeLoad(elements), [elements]);
+
 
   const activeEdgeKeys = useMemo(() => {
     const set = new Set<string>();
