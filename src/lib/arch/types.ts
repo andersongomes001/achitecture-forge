@@ -120,6 +120,16 @@ export interface ArchElement {
 
   // contract attached at the element level (topic/queue produce/consume contract)
   contractId?: string;
+
+  // load / capacity estimation
+  /** offered load: requests/s (service/api/external) or messages/s produced (topic/queue). */
+  loadRps?: number;
+  /** max sustained throughput a single instance/partition can handle (req|msg per s). */
+  capacityRps?: number;
+  /** number of instances / consumers / partitions sharing the load. */
+  instances?: number;
+  /** aggregate consumer drain rate for a queue/topic (msg/s). */
+  consumerRps?: number;
 }
 
 export interface Contract {
