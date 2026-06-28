@@ -89,7 +89,7 @@ const TEMPLATES: Record<string, { elements: ArchElement[]; seq: string }> = {
   },
   snsSqs: {
     elements: [
-      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"], outboxRelayId: "RELAY" },
+      { id: "API", name: "Orders API", type: "service", hasOutbox: true, idempotent: true, dataStores: ["DB"], outboxRelayId: "RELAY", outboxTargetId: "SNS" },
       { id: "DB", name: "Orders DB", type: "database", dbEngine: "postgres", dbReplicas: 2 },
       { id: "RELAY", name: "Outbox Relay", type: "relay", isRelayFor: "API" },
       { id: "SNS", name: "orders-topic", type: "topic", topicKind: "fanout", broker: "sns",
