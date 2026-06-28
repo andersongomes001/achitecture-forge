@@ -242,6 +242,9 @@ const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?:
   replica: { stroke: "var(--color-info)", dasharray: "1 3", width: 1 },
   "relay-read": { stroke: "var(--color-info)", dasharray: "3 2", width: 1.4 },
   "relay-publish": { stroke: "var(--color-accent)", dasharray: "5 2", width: 1.6 },
+  consume: { stroke: "var(--color-success)", dasharray: "5 2", width: 1.6 },
+  "broker-of": { stroke: "var(--color-accent)", dasharray: "1 3", width: 1 },
+  "inbox-table": { stroke: "var(--color-success)", dasharray: "3 3", width: 1.2 },
   "inbox-of": { stroke: "var(--color-success)", dasharray: "2 4", width: 1.2 },
 };
 
