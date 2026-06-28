@@ -69,6 +69,7 @@ export interface ManagedEdge {
 export interface CanvasState {
   positions: Record<string, XYPosition>;
   edges: { id: string; source: string; target: string; kind: EdgeKind }[];
+  edgeOffsets?: Record<string, { x: number; y: number }>;
 }
 
 interface Props {
