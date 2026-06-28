@@ -545,6 +545,42 @@ export function Inspector(props: Props) {
             </Row>
           </Section>
 
+          {["service", "api-gateway", "lambda", "saga", "stream", "external", "queue", "topic"].includes(element.type) && (
+            <Section title="Load & capacity">
+              <Row label="offered">
+                <input type="number" min={0} value={element.loadRps ?? ""}
+                  placeholder="rps / msgs"
+                  onChange={(e) => props.onChange({ loadRps: e.target.value === "" ? undefined : Number(e.target.value) })}
+                  className="mono text-[11px] bg-surface border border-border rounded px-2 py-1 outline-none w-24" />
+                <span className="text-[10px] text-muted-foreground ml-1">/s</span>
+              </Row>
+              {element.type === "queue" || element.type === "topic" ? (
+                <Row label="drain rate">
+                  <input type="number" min={0} value={element.consumerRps ?? ""}
+                    placeholder="consumed"
+                    onChange={(e) => props.onChange({ consumerRps: e.target.value === "" ? undefined : Number(e.target.value) })}
+                    className="mono text-[11px] bg-surface border border-border rounded px-2 py-1 outline-none w-24" />
+                  <span className="text-[10px] text-muted-foreground ml-1">/s</span>
+                </Row>
+              ) : (
+                <>
+                  <Row label="capacity">
+                    <input type="number" min={0} value={element.capacityRps ?? ""}
+                      placeholder="per instance"
+                      onChange={(e) => props.onChange({ capacityRps: e.target.value === "" ? undefined : Number(e.target.value) })}
+                      className="mono text-[11px] bg-surface border border-border rounded px-2 py-1 outline-none w-24" />
+                    <span className="text-[10px] text-muted-foreground ml-1">/s</span>
+                  </Row>
+                  <Row label="instances">
+                    <input type="number" min={1} value={element.instances ?? 1}
+                      onChange={(e) => props.onChange({ instances: Number(e.target.value) || 1 })}
+                      className="mono text-[11px] bg-surface border border-border rounded px-2 py-1 outline-none w-24" />
+                  </Row>
+                </>
+              )}
+              <p className="text-[9.5px] text-muted-foreground">Validated in the Load tab: utilization, overload and queue backlog growth.</p>
+            </Section>
+
           <div className="pt-2 border-t border-border">
             <button onClick={props.onRemove}
               className="text-[11px] text-destructive hover:underline">
