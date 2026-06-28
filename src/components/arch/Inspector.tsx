@@ -648,6 +648,37 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+function IdField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const shown = editing ? draft : value;
+  const commit = () => {
+    setEditing(false);
+    const next = draft.replace(/\s+/g, "_").toUpperCase();
+    if (next && next !== value) onCommit(next);
+  };
+  return (
+    <input
+      value={shown}
+      onFocus={() => {
+        setDraft(value);
+        setEditing(true);
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") {
+          setDraft(value);
+          setEditing(false);
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      className="mono text-[11px] bg-surface border border-border rounded px-2 py-1 outline-none flex-1"
+    />
+  );
+}
+
 function ToggleRow({ on, onChange, label, hint }: { on: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
     <button
