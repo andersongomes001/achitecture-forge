@@ -6,6 +6,7 @@ import {
   Controls,
   Handle,
   MiniMap,
+  NodeToolbar,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -34,12 +35,18 @@ export type EdgeKind =
   | "headers"
   | "pubsub"
   | "owns"
-  | "dlq";
+  | "dlq"
+  | "retry"
+  | "replica"
+  | "relay-read"
+  | "relay-publish"
+  | "inbox-of";
 
 export interface CanvasEdgeData {
   kind: EdgeKind;
   label?: string;
   managed?: boolean;
+  failed?: boolean;
   [key: string]: unknown;
 }
 
@@ -60,9 +67,15 @@ interface Props {
   elements: ArchElement[];
   state: CanvasState;
   onStateChange: (s: CanvasState) => void;
-  activeEdgeKeys: Set<string>; // `${from}->${to}`
+  activeEdgeKeys: Set<string>;
+  failedEdgeKeys?: Set<string>;
+  selectedId?: string | null;
+  onSelect?: (id: string | null) => void;
   onDropType?: (type: ElementType, pos: XYPosition) => void;
   managedEdges?: ManagedEdge[];
+  onAddDlq?: (queueId: string) => void;
+  onAddRetry?: (queueId: string) => void;
+  onRemoveElement?: (id: string) => void;
 }
 
 const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: string }> = {
@@ -76,59 +89,112 @@ const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: str
   lambda: { glyph: "λ", color: "var(--color-accent)", label: "Lambda" },
   scheduler: { glyph: "⏱", color: "var(--color-info)", label: "Scheduler" },
   stream: { glyph: "⌇", color: "var(--color-warning)", label: "Stream" },
-  saga: { glyph: "⎈", color: "var(--color-success)", label: "Saga Orchestrator" },
+  saga: { glyph: "⎈", color: "var(--color-success)", label: "Saga" },
+  relay: { glyph: "↻", color: "var(--color-info)", label: "Outbox Relay" },
+  "inbox-store": { glyph: "▤", color: "var(--color-success)", label: "Inbox Store" },
 };
 
 type ArchNodeData = {
   element: ArchElement;
   orphan: boolean;
+  onAddDlq?: (id: string) => void;
+  onAddRetry?: (id: string) => void;
   [key: string]: unknown;
 };
 
 function ArchNode({ data, selected }: NodeProps) {
   const d = data as ArchNodeData;
-  const meta = TYPE_GLYPH[d.element.type];
+  const el = d.element;
+  const meta = TYPE_GLYPH[el.type];
   const tags = [
-    d.element.hasOutbox && "outbox",
-    d.element.hasInbox && "inbox",
-    d.element.idempotent && "idem",
+    el.hasOutbox && "outbox",
+    el.hasInbox && "inbox",
+    el.idempotent && "idem",
+    el.circuitBreaker && "cb",
   ].filter(Boolean) as string[];
+
   const handleClass =
-    "!w-3 !h-3 !bg-primary !border !border-background hover:!bg-accent transition-colors";
+    "!w-2.5 !h-2.5 !bg-primary !border !border-background hover:!bg-accent !opacity-70 hover:!opacity-100 transition";
   const topicMeta =
-    d.element.type === "topic"
-      ? `${d.element.broker ?? "generic"} · ${d.element.topicKind ?? "fanout"} · ${d.element.bindings?.length ?? 0} bind`
-      : d.element.type === "queue"
-        ? `${d.element.broker ?? "generic"}${d.element.fifo ? " · fifo" : ""}${d.element.consumerGroup ? ` · cg:${d.element.consumerGroup}` : ""}${d.element.partitions ? ` · p${d.element.partitions}` : ""}${d.element.dlqId ? " · dlq" : ""}`
-        : null;
+    el.type === "topic"
+      ? `${el.broker ?? "generic"} · ${el.topicKind ?? "fanout"}${el.partitions ? ` · p${el.partitions}` : ""}`
+      : el.type === "queue"
+        ? `${el.broker ?? "generic"}${el.fifo ? " · fifo" : ""}${el.consumerGroup ? ` · cg:${el.consumerGroup}` : ""}${el.dlqId ? " · dlq" : ""}${el.retryQueueId ? " · retry" : ""}`
+        : el.type === "database"
+          ? `${el.dbEngine ?? "generic"}${(el.dbReplicas ?? 0) > 0 ? ` · ${el.dbReplicas} replicas` : ""}${el.dbConsistency ? ` · ${el.dbConsistency}` : ""}`
+          : null;
+
+  const isQueue = el.type === "queue" && !el.isDlqFor && !el.isRetryFor;
+
   return (
     <div
       className={`relative rounded-md border bg-surface px-3 py-2 min-w-[160px] shadow-sm transition-colors ${
-        selected ? "border-primary" : "border-border"
+        selected ? "border-primary ring-1 ring-primary/40" : "border-border"
       }`}
     >
-      {/* dual-mode handles on all 4 sides for easy connection (loose mode) */}
-      <Handle id="l" type="source" position={Position.Left} className={handleClass} />
-      <Handle id="r" type="source" position={Position.Right} className={handleClass} />
-      <Handle id="t" type="source" position={Position.Top} className={handleClass} />
-      <Handle id="b" type="source" position={Position.Bottom} className={handleClass} />
+      {isQueue && (
+        <NodeToolbar position={Position.Top} offset={6}>
+          <div className="flex gap-1">
+            {!el.dlqId && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  d.onAddDlq?.(el.id);
+                }}
+                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20"
+              >
+                + DLQ
+              </button>
+            )}
+            {!el.retryQueueId && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  d.onAddRetry?.(el.id);
+                }}
+                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-warning/50 bg-warning/10 text-warning hover:bg-warning/20"
+              >
+                + Retry
+              </button>
+            )}
+          </div>
+        </NodeToolbar>
+      )}
+
+      {/* dual handles on all 4 sides */}
+      {(["l", "r", "t", "b"] as const).map((side) => {
+        const pos =
+          side === "l" ? Position.Left : side === "r" ? Position.Right : side === "t" ? Position.Top : Position.Bottom;
+        return (
+          <span key={side}>
+            <Handle id={`${side}-s`} type="source" position={pos} className={handleClass} />
+            <Handle id={`${side}-t`} type="target" position={pos} className={handleClass} />
+          </span>
+        );
+      })}
+
       <div className="flex items-center gap-2">
         <span
-          className="w-6 h-6 grid place-items-center rounded border border-border font-mono text-sm"
+          className="w-6 h-6 grid place-items-center rounded border border-border font-mono text-sm shrink-0"
           style={{ color: meta.color }}
         >
           {meta.glyph}
         </span>
         <div className="min-w-0">
-          <div className="text-[12px] font-medium truncate">{d.element.name}</div>
+          <div className="text-[12px] font-medium truncate">{el.name}</div>
           <div className="text-[9px] uppercase tracking-wider text-muted-foreground mono">
-            {d.element.id} · {meta.label}
+            {el.id} · {meta.label}
           </div>
         </div>
       </div>
       {topicMeta && (
-        <div className="mt-1 text-[9px] uppercase tracking-wider text-accent mono">
+        <div className="mt-1 text-[9px] uppercase tracking-wider text-accent mono truncate">
           {topicMeta}
+        </div>
+      )}
+      {el.contractId && (
+        <div className="mt-1 text-[9px] uppercase tracking-wider text-info mono truncate">
+          ⌘ contract:{el.contractId}
         </div>
       )}
       {tags.length > 0 && (
@@ -168,11 +234,47 @@ const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?:
   pubsub: { stroke: "var(--color-success)", dasharray: "10 3", width: 2.2 },
   owns: { stroke: "var(--color-muted-foreground)", dasharray: "3 3", width: 1.2 },
   dlq: { stroke: "var(--color-destructive)", dasharray: "4 2", width: 1.6 },
+  retry: { stroke: "var(--color-warning)", dasharray: "2 2", width: 1.4 },
+  replica: { stroke: "var(--color-info)", dasharray: "1 3", width: 1 },
+  "relay-read": { stroke: "var(--color-info)", dasharray: "3 2", width: 1.4 },
+  "relay-publish": { stroke: "var(--color-accent)", dasharray: "5 2", width: 1.6 },
+  "inbox-of": { stroke: "var(--color-success)", dasharray: "2 4", width: 1.2 },
 };
 
 const CYCLABLE: ReadonlySet<EdgeKind> = new Set(["sync", "async", "response"]);
 
-function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropType, managedEdges = [] }: Props) {
+/** Pick best source/target handle sides based on relative node centers. */
+function pickHandles(
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+): { sourceHandle: string; targetHandle: string } {
+  const dx = tx - sx;
+  const dy = ty - sy;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { sourceHandle: "r-s", targetHandle: "l-t" }
+      : { sourceHandle: "l-s", targetHandle: "r-t" };
+  }
+  return dy >= 0
+    ? { sourceHandle: "b-s", targetHandle: "t-t" }
+    : { sourceHandle: "t-s", targetHandle: "b-t" };
+}
+
+function InnerCanvas({
+  elements,
+  state,
+  onStateChange,
+  activeEdgeKeys,
+  failedEdgeKeys,
+  selectedId,
+  onSelect,
+  onDropType,
+  managedEdges = [],
+  onAddDlq,
+  onAddRetry,
+}: Props) {
   const positionsRef = useRef(state.positions);
   positionsRef.current = state.positions;
 
@@ -182,9 +284,11 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
         id: el.id,
         type: "arch",
         position:
-          state.positions[el.id] ??
-          { x: 60 + (i % 3) * 220, y: 60 + Math.floor(i / 3) * 130 },
-        data: { element: el, orphan: false },
+          state.positions[el.id] ?? {
+            x: 60 + (i % 4) * 240,
+            y: 60 + Math.floor(i / 4) * 150,
+          },
+        data: { element: el, orphan: false, onAddDlq, onAddRetry },
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -201,47 +305,53 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
     })),
   );
 
-  // sync elements -> nodes (add/remove/update data)
+  // map id → position for handle picking
+  const nodePos = useMemo(() => {
+    const m = new Map<string, XYPosition>();
+    for (const n of nodes) m.set(n.id, n.position);
+    return m;
+  }, [nodes]);
+
+  // sync elements -> nodes
   useEffect(() => {
     setNodes((curr) => {
       const byId = new Map(curr.map((n) => [n.id, n]));
-      const keep = elements.map((el, i) => {
+      return elements.map((el, i) => {
         const existing = byId.get(el.id);
         const connected =
           edges.some((e) => e.source === el.id || e.target === el.id) ||
           managedEdges.some((e) => e.source === el.id || e.target === el.id);
         const orphan = !connected;
         if (existing) {
-          return { ...existing, data: { element: el, orphan } };
+          return {
+            ...existing,
+            selected: existing.id === selectedId,
+            data: { element: el, orphan, onAddDlq, onAddRetry },
+          };
         }
         return {
           id: el.id,
           type: "arch",
           position:
             positionsRef.current[el.id] ??
-            { x: 80 + (i % 3) * 220, y: 80 + Math.floor(i / 3) * 130 },
-          data: { element: el, orphan },
+            { x: 80 + (i % 4) * 240, y: 80 + Math.floor(i / 4) * 150 },
+          selected: el.id === selectedId,
+          data: { element: el, orphan, onAddDlq, onAddRetry },
         } as Node;
       });
-      return keep;
     });
-  }, [elements, edges, managedEdges, setNodes]);
+  }, [elements, edges, managedEdges, selectedId, onAddDlq, onAddRetry, setNodes]);
 
-  // style edges with kind + active highlighting; merge managed edges
   const styledEdges = useMemo<Edge[]>(() => {
-    const all: Array<{ e: Edge; kind: EdgeKind; label?: string; managed: boolean }> = [];
+    type EE = { e: Edge; kind: EdgeKind; label?: string; managed: boolean };
+    const all: EE[] = [];
     for (const e of edges) {
       const data = e.data as CanvasEdgeData | undefined;
       all.push({ e, kind: (data?.kind ?? "sync") as EdgeKind, label: data?.label, managed: false });
     }
     for (const m of managedEdges) {
       all.push({
-        e: {
-          id: m.id,
-          source: m.source,
-          target: m.target,
-          data: { kind: m.kind, label: m.label, managed: true },
-        } as Edge,
+        e: { id: m.id, source: m.source, target: m.target, data: { kind: m.kind, label: m.label, managed: true } } as Edge,
         kind: m.kind,
         label: m.label,
         managed: true,
@@ -250,8 +360,17 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
     return all.map(({ e, kind, label, managed }) => {
       const style = EDGE_STYLE[kind];
       const active = activeEdgeKeys.has(`${e.source}->${e.target}`);
+      const failed = failedEdgeKeys?.has(`${e.source}->${e.target}`) ?? false;
+      const sp = nodePos.get(e.source);
+      const tp = nodePos.get(e.target);
+      const handles = sp && tp
+        ? pickHandles(sp.x, sp.y, tp.x, tp.y)
+        : { sourceHandle: "r-s", targetHandle: "l-t" };
       return {
         ...e,
+        type: "smoothstep",
+        sourceHandle: handles.sourceHandle,
+        targetHandle: handles.targetHandle,
         animated: true,
         label,
         labelStyle: { fill: "var(--color-foreground)", fontSize: 10, fontFamily: "var(--font-mono)" },
@@ -259,17 +378,20 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
         labelBgPadding: [4, 2] as [number, number],
         labelBgBorderRadius: 3,
         style: {
-          stroke: active ? "var(--color-accent)" : style.stroke,
-          strokeWidth: active ? 2.8 : style.width ?? 1.6,
+          stroke: failed ? "var(--color-destructive)" : active ? "var(--color-accent)" : style.stroke,
+          strokeWidth: failed ? 3 : active ? 2.8 : style.width ?? 1.6,
           strokeDasharray: style.dasharray,
-          opacity: managed ? 0.95 : 1,
-          filter: active ? "drop-shadow(0 0 6px var(--color-accent))" : undefined,
+          opacity: managed ? 0.9 : 1,
+          filter: failed
+            ? "drop-shadow(0 0 8px var(--color-destructive))"
+            : active
+              ? "drop-shadow(0 0 6px var(--color-accent))"
+              : undefined,
         },
       } as Edge;
     });
-  }, [edges, managedEdges, activeEdgeKeys]);
+  }, [edges, managedEdges, activeEdgeKeys, failedEdgeKeys, nodePos]);
 
-  // emit state upward on changes (only user-owned edges, never managed)
   function emitState(nextNodes: Node[], nextEdges: Edge[]) {
     const positions: Record<string, XYPosition> = {};
     for (const n of nextNodes) positions[n.id] = n.position;
@@ -287,7 +409,6 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       onNodesChange(changes);
-      // sync positions when drag ends
       if (changes.some((c) => c.type === "position" && c.dragging === false)) {
         setNodes((curr) => {
           emitState(curr, edges);
@@ -341,7 +462,7 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
   };
 
   return (
-    <div className="h-[480px] w-full" onDragOver={onDragOver} onDrop={onDrop}>
+    <div className="h-full w-full" onDragOver={onDragOver} onDrop={onDrop}>
       <ReactFlow
         nodes={nodes}
         edges={styledEdges}
@@ -349,8 +470,9 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
+        onNodeClick={(_, n) => onSelect?.(n.id)}
+        onPaneClick={() => onSelect?.(null)}
         onEdgeClick={(_, edge) => {
-          // managed edges (bindings) are not cyclable
           const data = edge.data as CanvasEdgeData | undefined;
           if (data?.managed || !CYCLABLE.has((data?.kind ?? "sync") as EdgeKind)) return;
           setEdges((curr) => {
@@ -366,11 +488,13 @@ function InnerCanvas({ elements, state, onStateChange, activeEdgeKeys, onDropTyp
           });
         }}
         fitView
+        snapToGrid
+        snapGrid={[16, 16]}
         connectionMode={ConnectionMode.Loose}
         proOptions={{ hideAttribution: true }}
-        defaultEdgeOptions={{ animated: true }}
+        defaultEdgeOptions={{ animated: true, type: "smoothstep" }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-grid)" />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-grid)" />
         <Controls className="!bg-surface !border !border-border" />
         <MiniMap
           maskColor="oklch(0.18 0.03 250 / 0.7)"
