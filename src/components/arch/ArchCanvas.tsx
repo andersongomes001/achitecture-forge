@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
   ConnectionMode,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   MiniMap,
   NodeToolbar,
@@ -13,9 +15,12 @@ import {
   addEdge,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type EdgeChange,
+  type EdgeProps,
+  type EdgeTypes,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -50,6 +55,8 @@ export interface CanvasEdgeData {
   label?: string;
   managed?: boolean;
   failed?: boolean;
+  offset?: { x: number; y: number };
+  onOffset?: (id: string, offset: { x: number; y: number }) => void;
   [key: string]: unknown;
 }
 
@@ -64,6 +71,7 @@ export interface ManagedEdge {
 export interface CanvasState {
   positions: Record<string, XYPosition>;
   edges: { id: string; source: string; target: string; kind: EdgeKind }[];
+  edgeOffsets?: Record<string, { x: number; y: number }>;
 }
 
 interface Props {
@@ -250,7 +258,90 @@ const EDGE_STYLE: Record<EdgeKind, { stroke: string; dasharray?: string; width?:
 
 const CYCLABLE: ReadonlySet<EdgeKind> = new Set(["sync", "async", "response"]);
 
-/** Pick best source/target handle sides based on relative node centers. */
+/** Curved edge whose midpoint can be dragged to route lines around nodes. */
+function EditableEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  markerEnd,
+  style,
+  data,
+  label,
+  labelStyle,
+}: EdgeProps) {
+  const { screenToFlowPosition } = useReactFlow();
+  const d = data as CanvasEdgeData | undefined;
+  const off = d?.offset ?? { x: 0, y: 0 };
+  const cx = (sourceX + targetX) / 2;
+  const cy = (sourceY + targetY) / 2;
+  const midX = cx + off.x;
+  const midY = cy + off.y;
+  const ctrlX = cx + 2 * off.x;
+  const ctrlY = cy + 2 * off.y;
+  const path = `M ${sourceX},${sourceY} Q ${ctrlX},${ctrlY} ${targetX},${targetY}`;
+  const dragging = useRef(false);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    dragging.current = true;
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    d?.onOffset?.(id, { x: p.x - cx, y: p.y - cy });
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    dragging.current = false;
+    (e.target as Element).releasePointerCapture?.(e.pointerId);
+  };
+  const reset = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    d?.onOffset?.(id, { x: 0, y: 0 });
+  };
+
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
+      <EdgeLabelRenderer>
+        <div
+          className="nodrag nopan group"
+          style={{
+            position: "absolute",
+            transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
+            pointerEvents: "all",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          {label && (
+            <span
+              style={labelStyle}
+              className="mono text-[10px] px-1 rounded bg-surface/85 border border-border whitespace-nowrap"
+            >
+              {label}
+            </span>
+          )}
+          <span
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onDoubleClick={reset}
+            title="Drag to reroute · double-click to reset"
+            className="block w-2.5 h-2.5 rounded-full border border-background bg-accent/40 opacity-40 hover:opacity-100 hover:scale-150 transition cursor-move"
+          />
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const edgeTypes: EdgeTypes = { editable: EditableEdge };
+
+
 function pickHandles(
   sx: number,
   sy: number,
@@ -284,6 +375,9 @@ function InnerCanvas({
 }: Props) {
   const positionsRef = useRef(state.positions);
   positionsRef.current = state.positions;
+  const edgeOffsets = state.edgeOffsets ?? {};
+  const offsetsRef = useRef(edgeOffsets);
+  offsetsRef.current = edgeOffsets;
 
   const initialNodes: Node[] = useMemo(
     () =>
@@ -310,6 +404,31 @@ function InnerCanvas({
       data: { kind: e.kind },
       animated: true,
     })),
+  );
+
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+
+  const updateOffset = useCallback(
+    (edgeId: string, offset: { x: number; y: number }) => {
+      const next = { ...offsetsRef.current, [edgeId]: offset };
+      offsetsRef.current = next;
+      const positions: Record<string, XYPosition> = {};
+      for (const n of nodesRef.current) positions[n.id] = n.position;
+      onStateChange({
+        positions,
+        edges: edgesRef.current.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          kind: ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as EdgeKind,
+        })),
+        edgeOffsets: next,
+      });
+    },
+    [onStateChange],
   );
 
   // map id → position for handle picking
@@ -375,15 +494,20 @@ function InnerCanvas({
         : { sourceHandle: "r-s", targetHandle: "l-t" };
       return {
         ...e,
-        type: "smoothstep",
+        type: "editable",
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
         animated: true,
         label,
-        labelStyle: { fill: "var(--color-foreground)", fontSize: 10, fontFamily: "var(--font-mono)" },
-        labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.85 },
-        labelBgPadding: [4, 2] as [number, number],
-        labelBgBorderRadius: 3,
+        labelStyle: { color: "var(--color-foreground)" },
+        data: {
+          ...(e.data as object),
+          kind,
+          label,
+          managed,
+          offset: edgeOffsets[e.id],
+          onOffset: updateOffset,
+        },
         style: {
           stroke: failed ? "var(--color-destructive)" : active ? "var(--color-accent)" : style.stroke,
           strokeWidth: failed ? 3 : active ? 2.8 : style.width ?? 1.6,
@@ -397,7 +521,7 @@ function InnerCanvas({
         },
       } as Edge;
     });
-  }, [edges, managedEdges, activeEdgeKeys, failedEdgeKeys, nodePos]);
+  }, [edges, managedEdges, activeEdgeKeys, failedEdgeKeys, nodePos, edgeOffsets, updateOffset]);
 
   function emitState(nextNodes: Node[], nextEdges: Edge[]) {
     const positions: Record<string, XYPosition> = {};
@@ -410,6 +534,7 @@ function InnerCanvas({
         target: e.target,
         kind: ((e.data as CanvasEdgeData | undefined)?.kind ?? "sync") as EdgeKind,
       })),
+      edgeOffsets: offsetsRef.current,
     });
   }
 
@@ -474,6 +599,7 @@ function InnerCanvas({
         nodes={nodes}
         edges={styledEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
@@ -499,7 +625,7 @@ function InnerCanvas({
         snapGrid={[16, 16]}
         connectionMode={ConnectionMode.Loose}
         proOptions={{ hideAttribution: true }}
-        defaultEdgeOptions={{ animated: true, type: "smoothstep" }}
+        defaultEdgeOptions={{ animated: true, type: "editable" }}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-grid)" />
         <Controls className="!bg-surface !border !border-border" />
@@ -523,4 +649,26 @@ export function ArchCanvas(props: Props) {
   );
 }
 
-export { TYPE_GLYPH };
+export { TYPE_GLYPH, EDGE_STYLE };
+
+/** Human-readable legend metadata for edge kinds. */
+export const EDGE_LEGEND: { kind: EdgeKind; label: string }[] = [
+  { kind: "sync", label: "Sync call (->>)" },
+  { kind: "async", label: "Async message (-))" },
+  { kind: "response", label: "Response (-->>)" },
+  { kind: "fanout", label: "Fanout exchange" },
+  { kind: "direct", label: "Direct routing" },
+  { kind: "topic-route", label: "Topic routing key" },
+  { kind: "headers", label: "Headers match" },
+  { kind: "pubsub", label: "Pub/Sub" },
+  { kind: "relay-publish", label: "Outbox relay publish" },
+  { kind: "relay-read", label: "Relay polls outbox" },
+  { kind: "consume", label: "Inbox consume" },
+  { kind: "inbox-of", label: "Inbox dedup" },
+  { kind: "inbox-table", label: "Inbox dedup table" },
+  { kind: "owns", label: "Owns data store" },
+  { kind: "dlq", label: "Dead-letter queue" },
+  { kind: "retry", label: "Retry queue" },
+  { kind: "replica", label: "DB replica" },
+  { kind: "broker-of", label: "Broker hosts" },
+];

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind, TYPE_GLYPH } from "@/components/arch/ArchCanvas";
+import { ArchCanvas, type CanvasState, type ManagedEdge, type EdgeKind, TYPE_GLYPH, EDGE_STYLE, EDGE_LEGEND } from "@/components/arch/ArchCanvas";
 import { Inspector } from "@/components/arch/Inspector";
 import { parseSequence } from "@/lib/arch/parser";
 import { importFromMermaid } from "@/lib/arch/import";
+import { generateMermaid } from "@/lib/arch/generate";
+import { computeLoad, fmtRate, type LoadRow, type LoadResult, type LoadStatus } from "@/lib/arch/load";
 import { simulate } from "@/lib/arch/simulator";
 import {
   addDlqFor,
@@ -174,17 +176,39 @@ function uid() {
   return Math.random().toString(36).slice(2, 7).toUpperCase();
 }
 
+interface Scenario {
+  id: string;
+  name: string;
+  seq: string;
+}
+
 function ForgePage() {
   const [elements, setElementsRaw] = useState<ArchElement[]>(DEFAULT_ELEMENTS);
-  const [seqCode, setSeqCode] = useState(DEFAULT_SEQ);
+  const [scenarios, setScenarios] = useState<Scenario[]>([
+    { id: "s1", name: "Main flow", seq: DEFAULT_SEQ },
+  ]);
+  const [activeScenario, setActiveScenario] = useState("s1");
+  const seqCode = scenarios.find((s) => s.id === activeScenario)?.seq ?? "";
+  function setSeqCode(updater: string | ((prev: string) => string)) {
+    setScenarios((prev) =>
+      prev.map((s) =>
+        s.id === activeScenario
+          ? { ...s, seq: typeof updater === "function" ? updater(s.seq) : updater }
+          : s,
+      ),
+    );
+  }
   const [faults, setFaults] = useState<Fault[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const [canvasState, setCanvasState] = useState<CanvasState>({ positions: {}, edges: [] });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
-  const [drawerTab, setDrawerTab] = useState<"sequence" | "findings" | "playback">("playback");
+  const [drawerTab, setDrawerTab] = useState<"sequence" | "findings" | "playback" | "load">("playback");
   const [drawerOpen, setDrawerOpen] = useState(true);
+  const [paletteExpanded, setPaletteExpanded] = useState(false);
+  const [showLegend, setShowLegend] = useState(true);
+  const [showGuide, setShowGuide] = useState(false);
 
   // playback
   const [playing, setPlaying] = useState(false);
@@ -203,6 +227,8 @@ function ForgePage() {
     () => simulate({ elements, steps: parsed.steps, faults, contracts }),
     [elements, parsed.steps, faults, contracts],
   );
+  const load = useMemo(() => computeLoad(elements), [elements]);
+
 
   const activeEdgeKeys = useMemo(() => {
     const set = new Set<string>();
@@ -395,6 +421,38 @@ function ForgePage() {
     URL.revokeObjectURL(a.href);
   }
 
+  // ----- scenarios (multiple sequence diagrams) -----
+  function addScenario() {
+    const id = `s${uid()}`;
+    setScenarios((prev) => [...prev, { id, name: `Scenario ${prev.length + 1}`, seq: "sequenceDiagram\n  autonumber\n" }]);
+    setActiveScenario(id);
+    setCurrentStep(null);
+    setPlaying(false);
+  }
+  function removeScenario(id: string) {
+    setScenarios((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((s) => s.id !== id);
+      if (id === activeScenario) setActiveScenario(next[0].id);
+      return next;
+    });
+  }
+  function renameScenario(id: string, name: string) {
+    setScenarios((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
+  }
+
+  // generate a mermaid sequence diagram from the current canvas
+  function generateFromCanvas() {
+    const seq = generateMermaid(elements, canvasState.edges, managedEdges);
+    const id = `s${uid()}`;
+    setScenarios((prev) => [...prev, { id, name: `From canvas ${prev.length + 1}`, seq }]);
+    setActiveScenario(id);
+    setDrawerTab("sequence");
+    setDrawerOpen(true);
+    setCurrentStep(null);
+    setPlaying(false);
+  }
+
   const selected = elements.find((e) => e.id === selectedId) ?? null;
   const stepEvents = useMemo(() => {
     const map = new Map<number, typeof result.events>();
@@ -457,9 +515,22 @@ function ForgePage() {
           ⇪ Import Mermaid
         </button>
 
+        <button
+          onClick={generateFromCanvas}
+          title="Generate a Mermaid sequence diagram from the components & connections on the canvas"
+          className="text-xs px-2 py-1 rounded-md border border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
+        >
+          ⤓ Generate from canvas
+        </button>
+
         <button onClick={exportJson}
           className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
           ↧ Export JSON
+        </button>
+
+        <button onClick={() => setShowGuide(true)}
+          className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
+          ? Guide
         </button>
 
         <div className="flex-1" />
@@ -467,6 +538,17 @@ function ForgePage() {
         <Pill tone="info">{parsed.steps.length} steps</Pill>
         <Pill tone={result.summary.errors ? "error" : "success"}>{result.summary.errors} errors</Pill>
         <Pill tone={result.summary.warnings ? "warning" : "muted"}>{result.summary.warnings} warnings</Pill>
+        <Pill tone={load.errors ? "error" : load.warnings ? "warning" : "muted"}>
+          {load.errors + load.warnings} load
+        </Pill>
+
+        <button
+          onClick={() => setShowLegend((v) => !v)}
+          className="ml-2 text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary"
+        >
+          {showLegend ? "Hide legend" : "Legend"}
+        </button>
+
 
         <button
           onClick={() => setShowInspector((v) => !v)}
@@ -478,7 +560,7 @@ function ForgePage() {
 
       {/* Body: palette | canvas+drawer | inspector */}
       <div className="flex-1 flex min-h-0">
-        <Palette onAdd={(t) => addElement(t)} />
+        <Palette onAdd={(t) => addElement(t)} expanded={paletteExpanded} onToggle={() => setPaletteExpanded((v) => !v)} />
 
         <div className="flex-1 flex flex-col min-w-0 relative">
           <div className="flex-1 min-h-0 relative">
@@ -514,6 +596,7 @@ function ForgePage() {
                 onChange={(e) => setSpeed(Number(e.target.value))}
                 className="w-20 accent-primary" title={`${speed}ms / step`} />
             </div>
+            {showLegend && <Legend />}
           </div>
 
           {/* Bottom drawer */}
@@ -526,7 +609,10 @@ function ForgePage() {
                 ⚠ Findings · {result.events.length}
               </DrawerTab>
               <DrawerTab active={drawerTab === "sequence"} onClick={() => { setDrawerTab("sequence"); setDrawerOpen(true); }}>
-                ⌥ Sequence
+                ⌥ Sequences · {scenarios.length}
+              </DrawerTab>
+              <DrawerTab active={drawerTab === "load"} onClick={() => { setDrawerTab("load"); setDrawerOpen(true); }}>
+                ⚡ Load{load.errors + load.warnings ? ` · ${load.errors + load.warnings}` : ""}
               </DrawerTab>
               <div className="flex-1" />
               <button onClick={() => setDrawerOpen((v) => !v)}
@@ -551,12 +637,40 @@ function ForgePage() {
                   <FindingsView events={result.events} onApply={applyRemediation} onHover={setCurrentStep} currentStep={currentStep} />
                 )}
                 {drawerTab === "sequence" && (
-                  <textarea
-                    className="mono w-full h-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
-                    value={seqCode}
-                    spellCheck={false}
-                    onChange={(e) => setSeqCode(e.target.value)}
-                  />
+                  <div className="flex flex-col h-full">
+                    <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-surface-2/40 overflow-x-auto shrink-0">
+                      {scenarios.map((s) => (
+                        <div key={s.id}
+                          className={`group flex items-center gap-1 px-2 py-1 rounded text-[11px] cursor-pointer whitespace-nowrap ${s.id === activeScenario ? "bg-primary/20 text-primary" : "bg-surface-2 text-muted-foreground hover:text-foreground"}`}
+                          onClick={() => { setActiveScenario(s.id); setCurrentStep(null); setPlaying(false); }}
+                        >
+                          <input
+                            value={s.name}
+                            onChange={(e) => renameScenario(s.id, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-transparent outline-none w-24 cursor-text"
+                          />
+                          {scenarios.length > 1 && (
+                            <button onClick={(e) => { e.stopPropagation(); removeScenario(s.id); }}
+                              className="opacity-0 group-hover:opacity-100 text-destructive">×</button>
+                          )}
+                        </div>
+                      ))}
+                      <button onClick={addScenario}
+                        className="px-2 py-1 rounded text-[11px] border border-border text-muted-foreground hover:text-primary hover:border-primary/40">
+                        + new
+                      </button>
+                    </div>
+                    <textarea
+                      className="mono flex-1 w-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
+                      value={seqCode}
+                      spellCheck={false}
+                      onChange={(e) => setSeqCode(e.target.value)}
+                    />
+                  </div>
+                )}
+                {drawerTab === "load" && (
+                  <LoadView load={load} />
                 )}
               </div>
             )}
@@ -581,15 +695,55 @@ function ForgePage() {
           />
         )}
       </div>
+      {showGuide && <GuideModal onClose={() => setShowGuide(false)} />}
     </div>
   );
 }
 
 /* ------- subcomponents ------- */
 
-function Palette({ onAdd }: { onAdd: (t: ElementType) => void }) {
+const GUIDE_STEPS: { title: string; body: string }[] = [
+  { title: "1 · Modele a arquitetura", body: "Arraste componentes da paleta (clique em › para expandir os nomes) e conecte-os no canvas. Componentes órfãos mostram um X até serem ligados." },
+  { title: "2 · Configure os detalhes", body: "Selecione um componente para abrir o inspector: brokers, DBs (réplicas/sharding), outbox/inbox, contratos e capacidade." },
+  { title: "3 · Ajuste as linhas", body: "Arraste o ponto central de qualquer linha para roteá-la fora dos componentes. Dê duplo-clique para resetar. A legenda explica cores e estilos." },
+  { title: "4 · Gere o diagrama de sequência", body: "Use 'Generate from canvas' para criar um diagrama Mermaid a partir dos componentes e conexões. Edite na aba Sequences." },
+  { title: "5 · Rode múltiplos cenários", body: "Crie vários diagramas de sequência (+ new) para testar fluxos diferentes sobre a mesma arquitetura. Cada um roda de forma independente." },
+  { title: "6 · Teste e valide", body: "Use o player (▶) para ver o dado trafegando passo a passo. Findings mostra riscos (dual-write, dedup, etc.) com remediações de 1 clique." },
+  { title: "7 · Valide carga", body: "Na aba Load, defina RPS oferecido e capacidade por instância (ou drain rate de filas) para detectar sobrecarga e crescimento de backlog." },
+];
+
+function GuideModal({ onClose }: { onClose: () => void }) {
   return (
-    <aside className="w-16 shrink-0 border-r border-border bg-surface/70 backdrop-blur flex flex-col items-center py-2 gap-1.5 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-lg shadow-2xl max-w-lg w-full max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-surface">
+          <h2 className="text-sm font-semibold">Como usar o Forge</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+        </div>
+        <ol className="p-4 space-y-3">
+          {GUIDE_STEPS.map((s) => (
+            <li key={s.title}>
+              <div className="text-xs font-semibold text-primary">{s.title}</div>
+              <div className="text-[12px] text-muted-foreground leading-relaxed">{s.body}</div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+
+function Palette({ onAdd, expanded, onToggle }: { onAdd: (t: ElementType) => void; expanded: boolean; onToggle: () => void }) {
+  return (
+    <aside className={`${expanded ? "w-44" : "w-16"} shrink-0 border-r border-border bg-surface/70 backdrop-blur flex flex-col py-2 gap-1.5 overflow-y-auto transition-all`}>
+      <button
+        onClick={onToggle}
+        title={expanded ? "Collapse palette" : "Expand palette"}
+        className={`mx-2 mb-1 h-7 rounded-md border border-border bg-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary/40 flex items-center ${expanded ? "justify-between px-2" : "justify-center"}`}
+      >
+        {expanded ? <><span>Components</span><span>‹</span></> : <span>›</span>}
+      </button>
       {(Object.keys(TYPE_GLYPH) as ElementType[])
         .filter((t) => t !== "relay" && t !== "inbox-store")
         .map((t) => {
@@ -604,18 +758,106 @@ function Palette({ onAdd }: { onAdd: (t: ElementType) => void }) {
               }}
               onClick={() => onAdd(t)}
               title={`Drag onto canvas or click to add ${m.label}`}
-              className="w-12 h-12 grid place-items-center rounded-md border border-border bg-surface hover:border-primary/60 hover:text-primary cursor-grab active:cursor-grabbing transition group relative"
+              className={`mx-2 h-11 rounded-md border border-border bg-surface hover:border-primary/60 hover:text-primary cursor-grab active:cursor-grabbing transition group relative flex items-center ${expanded ? "gap-2 px-3" : "justify-center"}`}
             >
-              <span className="mono text-xl" style={{ color: m.color }}>{m.glyph}</span>
-              <span className="absolute left-full ml-2 text-[10px] uppercase tracking-wider bg-surface border border-border rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-30">
-                {m.label}
-              </span>
+              <span className="mono text-xl shrink-0" style={{ color: m.color }}>{m.glyph}</span>
+              {expanded ? (
+                <span className="text-[11px] truncate">{m.label}</span>
+              ) : (
+                <span className="absolute left-full ml-2 text-[10px] uppercase tracking-wider bg-surface border border-border rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-30">
+                  {m.label}
+                </span>
+              )}
             </button>
           );
         })}
     </aside>
   );
 }
+
+function Legend() {
+  return (
+    <div className="absolute bottom-3 left-3 z-10 bg-surface/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-lg max-h-[60%] overflow-auto w-[210px]">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">Line legend</div>
+      <ul className="space-y-1">
+        {EDGE_LEGEND.map((l) => {
+          const st = EDGE_STYLE[l.kind];
+          return (
+            <li key={l.kind} className="flex items-center gap-2">
+              <svg width="26" height="8" className="shrink-0">
+                <line x1="0" y1="4" x2="26" y2="4"
+                  stroke={st?.stroke ?? "var(--color-primary)"}
+                  strokeWidth={st?.width ?? 1.6}
+                  strokeDasharray={st?.dasharray} />
+              </svg>
+              <span className="text-[10px] text-muted-foreground">{l.label}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function LoadView({ load }: { load: LoadResult }) {
+  if (load.rows.length === 0) {
+    return (
+      <div className="p-4 text-xs text-muted-foreground leading-relaxed">
+        No load configured yet. Select a service / API / queue / topic and set its{" "}
+        <span className="text-foreground">offered RPS</span> and{" "}
+        <span className="text-foreground">capacity per instance</span> (or consumer drain rate for
+        queues) below or in the inspector to validate capacity & backlog.
+      </div>
+    );
+  }
+  const tone: Record<LoadStatus, string> = {
+    over: "text-destructive",
+    warn: "text-amber-400",
+    ok: "text-green-400",
+    na: "text-muted-foreground",
+  };
+  return (
+    <table className="w-full text-[11px]">
+      <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-surface-2/40 sticky top-0">
+        <tr>
+          <th className="text-left px-3 py-1.5">Component</th>
+          <th className="text-right px-2">Offered</th>
+          <th className="text-right px-2">Capacity</th>
+          <th className="text-left px-2 w-28">Utilization</th>
+          <th className="text-left px-3">Diagnosis</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-border">
+        {load.rows.map((r: LoadRow) => {
+          const pct = r.utilization != null ? Math.round(r.utilization * 100) : null;
+          return (
+            <tr key={r.id}>
+              <td className="px-3 py-1.5">
+                <span className="text-foreground">{r.name}</span>
+                <span className="text-muted-foreground ml-1">· {r.type}</span>
+              </td>
+              <td className="text-right px-2 mono">{r.offered != null ? fmtRate(r.offered) : "—"}</td>
+              <td className="text-right px-2 mono">{r.capacity != null ? fmtRate(r.capacity) : "—"}</td>
+              <td className="px-2">
+                {pct != null ? (
+                  <div className="flex items-center gap-1">
+                    <div className="flex-1 h-1.5 rounded bg-surface-2 overflow-hidden">
+                      <div className={`h-full ${r.status === "over" ? "bg-destructive" : r.status === "warn" ? "bg-amber-400" : "bg-green-500"}`}
+                        style={{ width: `${Math.min(100, pct)}%` }} />
+                    </div>
+                    <span className={`mono ${tone[r.status]}`}>{pct}%</span>
+                  </div>
+                ) : <span className="text-muted-foreground">—</span>}
+              </td>
+              <td className={`px-3 py-1.5 ${tone[r.status]}`}>{r.note ?? "—"}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 
 function DrawerTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
