@@ -228,6 +228,7 @@ function ForgePage() {
   const [builderMode, setBuilderMode] = useState(false);
   const [builderSteps, setBuilderSteps] = useState<BuilderStep[]>([]);
   const [builderPending, setBuilderPending] = useState<string | null>(null);
+  const [seqRender, setSeqRender] = useState(false);
 
   function setElements(updater: ArchElement[] | ((prev: ArchElement[]) => ArchElement[])) {
     setElementsRaw((prev) => {
