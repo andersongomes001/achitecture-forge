@@ -547,7 +547,54 @@ function ForgePage() {
     setPlaying(false);
   }
 
-  // ----- scenarios (multiple sequence diagrams) -----
+  // ----- infer a sequence by traversing the canvas from an entry-point -----
+  function inferBuilderFrom(entryId: string) {
+    const flowKind = (k: EdgeKind): BuilderStep["kind"] | null => {
+      if (k === "sync" || k === "direct") return "sync";
+      if (k === "response") return "response";
+      if (
+        k === "async" || k === "fanout" || k === "pubsub" || k === "topic-route" ||
+        k === "headers" || k === "relay-publish" || k === "consume" ||
+        k === "publish" || k === "subscribe"
+      )
+        return "async";
+      return null; // structural edges (owns / dlq / replica / hosts …)
+    };
+
+    const all = [...canvasState.edges, ...managedEdges];
+    const outgoing = new Map<string, { to: string; kind: BuilderStep["kind"] }[]>();
+    for (const e of all) {
+      const k = flowKind(e.kind as EdgeKind);
+      if (!k) continue;
+      const arr = outgoing.get(e.source) ?? [];
+      arr.push({ to: e.target, kind: k });
+      outgoing.set(e.source, arr);
+    }
+
+    const steps: BuilderStep[] = [];
+    const visitedEdges = new Set<string>();
+    const stack = [entryId];
+    while (stack.length) {
+      const node = stack.shift()!;
+      for (const { to, kind } of outgoing.get(node) ?? []) {
+        const key = `${node}->${to}:${kind}`;
+        if (visitedEdges.has(key)) continue;
+        visitedEdges.add(key);
+        steps.push({ from: node, to, kind, label: "" });
+        stack.push(to);
+      }
+    }
+
+    if (steps.length === 0) {
+      // eslint-disable-next-line no-alert
+      alert("No outgoing connections found from this entry-point. Connect components on the canvas first.");
+      return;
+    }
+    setBuilderSteps(steps);
+    setBuilderPending(null);
+    setBuilderMode(true);
+  }
+
   function addScenario() {
     const id = `s${uid()}`;
     setScenarios((prev) => [...prev, { id, name: `Scenario ${prev.length + 1}`, seq: "sequenceDiagram\n  autonumber\n" }]);
