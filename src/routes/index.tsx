@@ -214,6 +214,12 @@ function ForgePage() {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(900); // ms per step
   const playRef = useRef<number | null>(null);
+  const importRef = useRef<HTMLInputElement | null>(null);
+
+  // canvas step builder (compose a sequence by clicking components)
+  const [builderMode, setBuilderMode] = useState(false);
+  const [builderSteps, setBuilderSteps] = useState<BuilderStep[]>([]);
+  const [builderPending, setBuilderPending] = useState<string | null>(null);
 
   function setElements(updater: ArchElement[] | ((prev: ArchElement[]) => ArchElement[])) {
     setElementsRaw((prev) => {
