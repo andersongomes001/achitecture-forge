@@ -182,6 +182,13 @@ interface Scenario {
   seq: string;
 }
 
+interface BuilderStep {
+  from: string;
+  to: string;
+  kind: "sync" | "async" | "response";
+  label: string;
+}
+
 function ForgePage() {
   const [elements, setElementsRaw] = useState<ArchElement[]>(DEFAULT_ELEMENTS);
   const [scenarios, setScenarios] = useState<Scenario[]>([
