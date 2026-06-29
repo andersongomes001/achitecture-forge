@@ -211,6 +211,7 @@ function ForgePage() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const [canvasState, setCanvasState] = useState<CanvasState>({ positions: {}, edges: [] });
+  const [layoutTick, setLayoutTick] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
   const [drawerTab, setDrawerTab] = useState<"sequence" | "findings" | "playback" | "load">("playback");
