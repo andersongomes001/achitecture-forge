@@ -745,6 +745,20 @@ function ForgePage() {
                 className="w-20 accent-primary" title={`${speed}ms / step`} />
             </div>
             {showLegend && <Legend />}
+            {builderMode && (
+              <BuilderPanel
+                steps={builderSteps}
+                pending={builderPending}
+                elements={elements}
+                onSetKind={(i, k) => setBuilderSteps((p) => p.map((s, idx) => idx === i ? { ...s, kind: k } : s))}
+                onSetLabel={(i, l) => setBuilderSteps((p) => p.map((s, idx) => idx === i ? { ...s, label: l } : s))}
+                onRemove={(i) => setBuilderSteps((p) => p.filter((_, idx) => idx !== i))}
+                onClearPending={() => setBuilderPending(null)}
+                onReset={() => { setBuilderSteps([]); setBuilderPending(null); }}
+                onSave={saveBuilderScenario}
+                onClose={() => { setBuilderMode(false); setBuilderPending(null); }}
+              />
+            )}
           </div>
 
           {/* Bottom drawer */}
