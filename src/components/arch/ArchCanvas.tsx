@@ -378,7 +378,9 @@ function InnerCanvas({
   managedEdges = [],
   onAddDlq,
   onAddRetry,
+  layoutTick,
 }: Props) {
+  const { fitView } = useReactFlow();
   const positionsRef = useRef(state.positions);
   positionsRef.current = state.positions;
   const edgeOffsets = state.edgeOffsets ?? {};
