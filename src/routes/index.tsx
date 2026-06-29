@@ -306,9 +306,12 @@ function ForgePage() {
         if (firstDb && ids.has(firstDb)) {
           out.push({ id: `mng:relayread:${el.id}->${firstDb}`, source: el.id, target: firstDb, kind: "relay-read", label: "poll outbox" });
         }
-        // relay publishes to the configured destination (topic / queue / broker)
-        if (svc?.outboxTargetId && ids.has(svc.outboxTargetId)) {
-          out.push({ id: `mng:relaypub:${el.id}->${svc.outboxTargetId}`, source: el.id, target: svc.outboxTargetId, kind: "relay-publish", label: "publish" });
+        // relay publishes to the configured destination(s) (topic / queue / broker)
+        const pubTargets = [svc?.outboxTargetId, ...(svc?.outboxTargetIds ?? [])].filter(Boolean) as string[];
+        for (const tId of Array.from(new Set(pubTargets))) {
+          if (ids.has(tId)) {
+            out.push({ id: `mng:relaypub:${el.id}->${tId}`, source: el.id, target: tId, kind: "relay-publish", label: "publish" });
+          }
         }
       }
       if (el.type === "inbox-store" && el.isInboxFor && ids.has(el.isInboxFor)) {
