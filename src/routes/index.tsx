@@ -719,7 +719,7 @@ function ForgePage() {
               activeEdgeKeys={activeEdgeKeys}
               failedEdgeKeys={failedEdgeKeys}
               selectedId={selectedId}
-              onSelect={(id) => { setSelectedId(id); if (id) setShowInspector(true); }}
+              onSelect={onCanvasSelect}
               managedEdges={managedEdges}
               onDropType={(type, pos) => addElement(type, pos)}
               onAddDlq={(id) => setElements((es) => addDlqFor(es, id))}
