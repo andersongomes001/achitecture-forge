@@ -873,15 +873,25 @@ function ForgePage() {
                         className="px-2 py-1 rounded text-[11px] border border-border text-muted-foreground hover:text-primary hover:border-primary/40">
                         + new
                       </button>
+                      <div className="flex-1" />
+                      <button onClick={() => setSeqRender((v) => !v)}
+                        className={`px-2 py-1 rounded text-[11px] border whitespace-nowrap ${seqRender ? "border-primary/60 bg-primary/20 text-primary" : "border-border text-muted-foreground hover:text-primary hover:border-primary/40"}`}>
+                        {seqRender ? "✎ Edit code" : "▣ Render diagram"}
+                      </button>
                     </div>
-                    <textarea
-                      className="mono flex-1 w-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
-                      value={seqCode}
-                      spellCheck={false}
-                      onChange={(e) => setSeqCode(e.target.value)}
-                    />
+                    {seqRender ? (
+                      <MermaidView code={seqCode} className="flex-1 overflow-auto bg-surface-2 p-3" />
+                    ) : (
+                      <textarea
+                        className="mono flex-1 w-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
+                        value={seqCode}
+                        spellCheck={false}
+                        onChange={(e) => setSeqCode(e.target.value)}
+                      />
+                    )}
                   </div>
                 )}
+
                 {drawerTab === "load" && (
                   <LoadView load={load} />
                 )}
