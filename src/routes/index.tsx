@@ -652,6 +652,30 @@ function ForgePage() {
           ↧ Export JSON
         </button>
 
+        <button onClick={() => importRef.current?.click()}
+          className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
+          ↥ Import JSON
+        </button>
+        <input
+          ref={importRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) importJson(f);
+            e.currentTarget.value = "";
+          }}
+        />
+
+        <button
+          onClick={() => { setBuilderMode((v) => !v); setBuilderPending(null); }}
+          title="Compose a sequence by clicking components on the canvas in order"
+          className={`text-xs px-2 py-1 rounded-md border ${builderMode ? "border-accent bg-accent/20 text-accent" : "border-border bg-surface-2 hover:border-primary/40 hover:text-primary"}`}
+        >
+          ✎ Build on canvas
+        </button>
+
         <button onClick={() => setShowGuide(true)}
           className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
           ? Guide
