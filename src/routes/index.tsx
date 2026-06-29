@@ -595,6 +595,7 @@ function ForgePage() {
     setBuilderMode(true);
   }
 
+  // ----- scenarios (multiple sequence diagrams) -----
   function addScenario() {
     const id = `s${uid()}`;
     setScenarios((prev) => [...prev, { id, name: `Scenario ${prev.length + 1}`, seq: "sequenceDiagram\n  autonumber\n" }]);
