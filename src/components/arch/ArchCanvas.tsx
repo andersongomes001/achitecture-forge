@@ -89,6 +89,8 @@ interface Props {
   onAddDlq?: (queueId: string) => void;
   onAddRetry?: (queueId: string) => void;
   onRemoveElement?: (id: string) => void;
+  /** Bump this number to re-apply positions from `state.positions` and fit the view. */
+  layoutTick?: number;
 }
 
 const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: string }> = {
