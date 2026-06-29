@@ -743,6 +743,23 @@ function ForgePage() {
         </Pill>
 
         <button
+          onClick={() => {
+            const ids = elements.map((e) => e.id);
+            const allEdges = [
+              ...canvasState.edges.map((e) => ({ source: e.source, target: e.target })),
+              ...managedEdges.map((e) => ({ source: e.source, target: e.target })),
+            ];
+            const positions = beautifyLayout(ids, allEdges);
+            setCanvasState((s) => ({ ...s, positions, edgeOffsets: {} }));
+            setLayoutTick((t) => t + 1);
+          }}
+          className="ml-2 text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary"
+          title="Auto-arrange components into a clean layered layout"
+        >
+          ✨ Beautify
+        </button>
+
+        <button
           onClick={() => setShowLegend((v) => !v)}
           className="ml-2 text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary"
         >
