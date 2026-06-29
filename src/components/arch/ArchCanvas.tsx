@@ -89,6 +89,8 @@ interface Props {
   onAddDlq?: (queueId: string) => void;
   onAddRetry?: (queueId: string) => void;
   onRemoveElement?: (id: string) => void;
+  /** Bump this number to re-apply positions from `state.positions` and fit the view. */
+  layoutTick?: number;
 }
 
 const TYPE_GLYPH: Record<ElementType, { glyph: string; color: string; label: string }> = {
@@ -376,7 +378,9 @@ function InnerCanvas({
   managedEdges = [],
   onAddDlq,
   onAddRetry,
+  layoutTick,
 }: Props) {
+  const { fitView } = useReactFlow();
   const positionsRef = useRef(state.positions);
   positionsRef.current = state.positions;
   const edgeOffsets = state.edgeOffsets ?? {};
@@ -471,6 +475,23 @@ function InnerCanvas({
       });
     });
   }, [elements, edges, managedEdges, selectedId, onAddDlq, onAddRetry, setNodes]);
+
+  // Re-apply positions from state when beautify bumps the tick.
+  const firstTick = useRef(true);
+  useEffect(() => {
+    if (firstTick.current) {
+      firstTick.current = false;
+      return;
+    }
+    setNodes((curr) =>
+      curr.map((n) => ({
+        ...n,
+        position: positionsRef.current[n.id] ?? n.position,
+      })),
+    );
+    window.setTimeout(() => fitView({ padding: 0.2, duration: 400 }), 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutTick]);
 
   const styledEdges = useMemo<Edge[]>(() => {
     type EE = { e: Edge; kind: EdgeKind; label?: string; managed: boolean };

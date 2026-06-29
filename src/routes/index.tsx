@@ -4,6 +4,7 @@ import { Inspector } from "@/components/arch/Inspector";
 import { parseSequence } from "@/lib/arch/parser";
 import { importFromMermaid } from "@/lib/arch/import";
 import { generateMermaid } from "@/lib/arch/generate";
+import { beautifyLayout } from "@/lib/arch/layout";
 import { MermaidView } from "@/components/arch/MermaidView";
 import { computeLoad, fmtRate, type LoadRow, type LoadResult, type LoadStatus } from "@/lib/arch/load";
 import { simulate } from "@/lib/arch/simulator";
@@ -210,6 +211,7 @@ function ForgePage() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const [canvasState, setCanvasState] = useState<CanvasState>({ positions: {}, edges: [] });
+  const [layoutTick, setLayoutTick] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
   const [drawerTab, setDrawerTab] = useState<"sequence" | "findings" | "playback" | "load">("playback");
@@ -741,6 +743,23 @@ function ForgePage() {
         </Pill>
 
         <button
+          onClick={() => {
+            const ids = elements.map((e) => e.id);
+            const allEdges = [
+              ...canvasState.edges.map((e) => ({ source: e.source, target: e.target })),
+              ...managedEdges.map((e) => ({ source: e.source, target: e.target })),
+            ];
+            const positions = beautifyLayout(ids, allEdges);
+            setCanvasState((s) => ({ ...s, positions, edgeOffsets: {} }));
+            setLayoutTick((t) => t + 1);
+          }}
+          className="ml-2 text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary"
+          title="Auto-arrange components into a clean layered layout"
+        >
+          ✨ Beautify
+        </button>
+
+        <button
           onClick={() => setShowLegend((v) => !v)}
           className="ml-2 text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary"
         >
@@ -771,6 +790,7 @@ function ForgePage() {
               selectedId={selectedId}
               onSelect={onCanvasSelect}
               managedEdges={managedEdges}
+              layoutTick={layoutTick}
               onDropType={(type, pos) => addElement(type, pos)}
               onAddDlq={(id) => setElements((es) => addDlqFor(es, id))}
               onAddRetry={(id) => setElements((es) => addRetryFor(es, id))}
