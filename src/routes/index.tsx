@@ -455,7 +455,7 @@ function ForgePage() {
 
   function exportJson() {
     const blob = new Blob(
-      [JSON.stringify({ elements, edges: canvasState.edges, positions: canvasState.positions, contracts, seq: seqCode, faults }, null, 2)],
+      [JSON.stringify({ elements, edges: canvasState.edges, positions: canvasState.positions, contracts, scenarios, seq: seqCode, faults }, null, 2)],
       { type: "application/json" },
     );
     const a = document.createElement("a");
@@ -463,6 +463,86 @@ function ForgePage() {
     a.download = "forge-architecture.json";
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  function importJson(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result));
+        if (Array.isArray(data.elements)) setElements(data.elements);
+        if (Array.isArray(data.contracts)) setContracts(data.contracts);
+        if (Array.isArray(data.faults)) setFaults(data.faults);
+        if (Array.isArray(data.scenarios) && data.scenarios.length) {
+          setScenarios(data.scenarios);
+          setActiveScenario(data.scenarios[0].id);
+        } else if (typeof data.seq === "string") {
+          const id = "s1";
+          setScenarios([{ id, name: "Imported", seq: data.seq }]);
+          setActiveScenario(id);
+        }
+        setCanvasState({
+          positions: data.positions ?? {},
+          edges: Array.isArray(data.edges) ? data.edges : [],
+        });
+        setSelectedId(null);
+        setCurrentStep(null);
+        setPlaying(false);
+      } catch (err) {
+        // eslint-disable-next-line no-alert
+        alert("Invalid Forge JSON file: " + (err as Error).message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ----- canvas step builder -----
+  function onCanvasSelect(id: string | null) {
+    if (builderMode && id) {
+      if (!builderPending) {
+        setBuilderPending(id);
+      } else {
+        setBuilderSteps((prev) => [
+          ...prev,
+          { from: builderPending, to: id, kind: "sync", label: "" },
+        ]);
+        setBuilderPending(null);
+      }
+      setSelectedId(id);
+      return;
+    }
+    setSelectedId(id);
+    if (id) setShowInspector(true);
+  }
+
+  function buildBuilderMermaid(steps: BuilderStep[]): string {
+    const tokenFor = (k: BuilderStep["kind"]) =>
+      k === "async" ? "-)" : k === "response" ? "-->>" : "->>";
+    const byId = new Map(elements.map((e) => [e.id, e]));
+    const order: string[] = [];
+    for (const s of steps) for (const x of [s.from, s.to]) if (!order.includes(x)) order.push(x);
+    const lines = ["sequenceDiagram", "  autonumber"];
+    for (const pid of order) lines.push(`  participant ${pid} as ${byId.get(pid)?.name ?? pid}`);
+    lines.push("");
+    for (const s of steps) {
+      lines.push(`  ${s.from}${tokenFor(s.kind)}${s.to}: ${s.label || "message"}`);
+    }
+    return lines.join("\n") + "\n";
+  }
+
+  function saveBuilderScenario() {
+    if (builderSteps.length === 0) return;
+    const seq = buildBuilderMermaid(builderSteps);
+    const id = `s${uid()}`;
+    setScenarios((prev) => [...prev, { id, name: `Canvas flow ${prev.length + 1}`, seq }]);
+    setActiveScenario(id);
+    setBuilderSteps([]);
+    setBuilderPending(null);
+    setBuilderMode(false);
+    setDrawerTab("sequence");
+    setDrawerOpen(true);
+    setCurrentStep(null);
+    setPlaying(false);
   }
 
   // ----- scenarios (multiple sequence diagrams) -----
