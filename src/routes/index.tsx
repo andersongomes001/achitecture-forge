@@ -182,6 +182,13 @@ interface Scenario {
   seq: string;
 }
 
+interface BuilderStep {
+  from: string;
+  to: string;
+  kind: "sync" | "async" | "response";
+  label: string;
+}
+
 function ForgePage() {
   const [elements, setElementsRaw] = useState<ArchElement[]>(DEFAULT_ELEMENTS);
   const [scenarios, setScenarios] = useState<Scenario[]>([
@@ -214,6 +221,12 @@ function ForgePage() {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(900); // ms per step
   const playRef = useRef<number | null>(null);
+  const importRef = useRef<HTMLInputElement | null>(null);
+
+  // canvas step builder (compose a sequence by clicking components)
+  const [builderMode, setBuilderMode] = useState(false);
+  const [builderSteps, setBuilderSteps] = useState<BuilderStep[]>([]);
+  const [builderPending, setBuilderPending] = useState<string | null>(null);
 
   function setElements(updater: ArchElement[] | ((prev: ArchElement[]) => ArchElement[])) {
     setElementsRaw((prev) => {
@@ -306,17 +319,23 @@ function ForgePage() {
         if (firstDb && ids.has(firstDb)) {
           out.push({ id: `mng:relayread:${el.id}->${firstDb}`, source: el.id, target: firstDb, kind: "relay-read", label: "poll outbox" });
         }
-        // relay publishes to the configured destination (topic / queue / broker)
-        if (svc?.outboxTargetId && ids.has(svc.outboxTargetId)) {
-          out.push({ id: `mng:relaypub:${el.id}->${svc.outboxTargetId}`, source: el.id, target: svc.outboxTargetId, kind: "relay-publish", label: "publish" });
+        // relay publishes to the configured destination(s) (topic / queue / broker)
+        const pubTargets = [svc?.outboxTargetId, ...(svc?.outboxTargetIds ?? [])].filter(Boolean) as string[];
+        for (const tId of Array.from(new Set(pubTargets))) {
+          if (ids.has(tId)) {
+            out.push({ id: `mng:relaypub:${el.id}->${tId}`, source: el.id, target: tId, kind: "relay-publish", label: "publish" });
+          }
         }
       }
       if (el.type === "inbox-store" && el.isInboxFor && ids.has(el.isInboxFor)) {
         out.push({ id: `mng:inbox:${el.isInboxFor}->${el.id}`, source: el.isInboxFor, target: el.id, kind: "inbox-of", label: "dedup" });
         const svc = elements.find((e) => e.id === el.isInboxFor);
-        // messages consumed from the configured source flow into the inbox store
-        if (svc?.inboxSourceId && ids.has(svc.inboxSourceId)) {
-          out.push({ id: `mng:consume:${svc.inboxSourceId}->${el.id}`, source: svc.inboxSourceId, target: el.id, kind: "consume", label: "consume" });
+        // messages consumed from the configured source(s) flow into the inbox store
+        const consumeSources = [svc?.inboxSourceId, ...(svc?.inboxSourceIds ?? [])].filter(Boolean) as string[];
+        for (const sId of Array.from(new Set(consumeSources))) {
+          if (ids.has(sId)) {
+            out.push({ id: `mng:consume:${sId}->${el.id}`, source: sId, target: el.id, kind: "consume", label: "consume" });
+          }
         }
         // inbox dedup table lives in a database (often the same as the outbox DB)
         if (svc?.inboxDbId && ids.has(svc.inboxDbId)) {
@@ -436,7 +455,7 @@ function ForgePage() {
 
   function exportJson() {
     const blob = new Blob(
-      [JSON.stringify({ elements, edges: canvasState.edges, positions: canvasState.positions, contracts, seq: seqCode, faults }, null, 2)],
+      [JSON.stringify({ elements, edges: canvasState.edges, positions: canvasState.positions, contracts, scenarios, seq: seqCode, faults }, null, 2)],
       { type: "application/json" },
     );
     const a = document.createElement("a");
@@ -444,6 +463,86 @@ function ForgePage() {
     a.download = "forge-architecture.json";
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  function importJson(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result));
+        if (Array.isArray(data.elements)) setElements(data.elements);
+        if (Array.isArray(data.contracts)) setContracts(data.contracts);
+        if (Array.isArray(data.faults)) setFaults(data.faults);
+        if (Array.isArray(data.scenarios) && data.scenarios.length) {
+          setScenarios(data.scenarios);
+          setActiveScenario(data.scenarios[0].id);
+        } else if (typeof data.seq === "string") {
+          const id = "s1";
+          setScenarios([{ id, name: "Imported", seq: data.seq }]);
+          setActiveScenario(id);
+        }
+        setCanvasState({
+          positions: data.positions ?? {},
+          edges: Array.isArray(data.edges) ? data.edges : [],
+        });
+        setSelectedId(null);
+        setCurrentStep(null);
+        setPlaying(false);
+      } catch (err) {
+        // eslint-disable-next-line no-alert
+        alert("Invalid Forge JSON file: " + (err as Error).message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ----- canvas step builder -----
+  function onCanvasSelect(id: string | null) {
+    if (builderMode && id) {
+      if (!builderPending) {
+        setBuilderPending(id);
+      } else {
+        setBuilderSteps((prev) => [
+          ...prev,
+          { from: builderPending, to: id, kind: "sync", label: "" },
+        ]);
+        setBuilderPending(null);
+      }
+      setSelectedId(id);
+      return;
+    }
+    setSelectedId(id);
+    if (id) setShowInspector(true);
+  }
+
+  function buildBuilderMermaid(steps: BuilderStep[]): string {
+    const tokenFor = (k: BuilderStep["kind"]) =>
+      k === "async" ? "-)" : k === "response" ? "-->>" : "->>";
+    const byId = new Map(elements.map((e) => [e.id, e]));
+    const order: string[] = [];
+    for (const s of steps) for (const x of [s.from, s.to]) if (!order.includes(x)) order.push(x);
+    const lines = ["sequenceDiagram", "  autonumber"];
+    for (const pid of order) lines.push(`  participant ${pid} as ${byId.get(pid)?.name ?? pid}`);
+    lines.push("");
+    for (const s of steps) {
+      lines.push(`  ${s.from}${tokenFor(s.kind)}${s.to}: ${s.label || "message"}`);
+    }
+    return lines.join("\n") + "\n";
+  }
+
+  function saveBuilderScenario() {
+    if (builderSteps.length === 0) return;
+    const seq = buildBuilderMermaid(builderSteps);
+    const id = `s${uid()}`;
+    setScenarios((prev) => [...prev, { id, name: `Canvas flow ${prev.length + 1}`, seq }]);
+    setActiveScenario(id);
+    setBuilderSteps([]);
+    setBuilderPending(null);
+    setBuilderMode(false);
+    setDrawerTab("sequence");
+    setDrawerOpen(true);
+    setCurrentStep(null);
+    setPlaying(false);
   }
 
   // ----- scenarios (multiple sequence diagrams) -----
@@ -553,6 +652,30 @@ function ForgePage() {
           ↧ Export JSON
         </button>
 
+        <button onClick={() => importRef.current?.click()}
+          className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
+          ↥ Import JSON
+        </button>
+        <input
+          ref={importRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) importJson(f);
+            e.currentTarget.value = "";
+          }}
+        />
+
+        <button
+          onClick={() => { setBuilderMode((v) => !v); setBuilderPending(null); }}
+          title="Compose a sequence by clicking components on the canvas in order"
+          className={`text-xs px-2 py-1 rounded-md border ${builderMode ? "border-accent bg-accent/20 text-accent" : "border-border bg-surface-2 hover:border-primary/40 hover:text-primary"}`}
+        >
+          ✎ Build on canvas
+        </button>
+
         <button onClick={() => setShowGuide(true)}
           className="text-xs px-2 py-1 rounded-md border border-border bg-surface-2 hover:border-primary/40 hover:text-primary">
           ? Guide
@@ -596,7 +719,7 @@ function ForgePage() {
               activeEdgeKeys={activeEdgeKeys}
               failedEdgeKeys={failedEdgeKeys}
               selectedId={selectedId}
-              onSelect={(id) => { setSelectedId(id); if (id) setShowInspector(true); }}
+              onSelect={onCanvasSelect}
               managedEdges={managedEdges}
               onDropType={(type, pos) => addElement(type, pos)}
               onAddDlq={(id) => setElements((es) => addDlqFor(es, id))}
@@ -622,6 +745,20 @@ function ForgePage() {
                 className="w-20 accent-primary" title={`${speed}ms / step`} />
             </div>
             {showLegend && <Legend />}
+            {builderMode && (
+              <BuilderPanel
+                steps={builderSteps}
+                pending={builderPending}
+                elements={elements}
+                onSetKind={(i, k) => setBuilderSteps((p) => p.map((s, idx) => idx === i ? { ...s, kind: k } : s))}
+                onSetLabel={(i, l) => setBuilderSteps((p) => p.map((s, idx) => idx === i ? { ...s, label: l } : s))}
+                onRemove={(i) => setBuilderSteps((p) => p.filter((_, idx) => idx !== i))}
+                onClearPending={() => setBuilderPending(null)}
+                onReset={() => { setBuilderSteps([]); setBuilderPending(null); }}
+                onSave={saveBuilderScenario}
+                onClose={() => { setBuilderMode(false); setBuilderPending(null); }}
+              />
+            )}
           </div>
 
           {/* Bottom drawer */}
@@ -820,6 +957,75 @@ function Legend() {
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+function BuilderPanel({
+  steps, pending, elements, onSetKind, onSetLabel, onRemove, onClearPending, onReset, onSave, onClose,
+}: {
+  steps: BuilderStep[];
+  pending: string | null;
+  elements: ArchElement[];
+  onSetKind: (i: number, k: BuilderStep["kind"]) => void;
+  onSetLabel: (i: number, l: string) => void;
+  onRemove: (i: number) => void;
+  onClearPending: () => void;
+  onReset: () => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const nameOf = (id: string) => elements.find((e) => e.id === id)?.name ?? id;
+  return (
+    <div className="absolute top-3 right-3 z-20 w-[300px] bg-surface/95 backdrop-blur border border-accent/50 rounded-lg shadow-2xl flex flex-col max-h-[70%]">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-accent">✎ Sequence builder</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
+      </div>
+      <div className="px-3 py-2 text-[10.5px] text-muted-foreground leading-snug border-b border-border">
+        {pending ? (
+          <span>From <b className="text-accent">{nameOf(pending)}</b> — now click the target component.{" "}
+            <button onClick={onClearPending} className="underline hover:text-foreground">cancel</button></span>
+        ) : (
+          <span>Click a component on the canvas to start a step (source → target).</span>
+        )}
+      </div>
+      <ol className="flex-1 overflow-auto divide-y divide-border">
+        {steps.map((s, i) => (
+          <li key={i} className="px-3 py-2 space-y-1">
+            <div className="flex items-center gap-1 text-[11px]">
+              <span className="mono w-5 text-muted-foreground">{i + 1}.</span>
+              <span className="truncate flex-1">{nameOf(s.from)} → {nameOf(s.to)}</span>
+              <button onClick={() => onRemove(i)} className="text-muted-foreground hover:text-destructive text-[10px]">✕</button>
+            </div>
+            <div className="flex items-center gap-1 pl-5">
+              <select value={s.kind} onChange={(e) => onSetKind(i, e.target.value as BuilderStep["kind"])}
+                className="text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none">
+                <option value="sync">sync →</option>
+                <option value="async">async ⇢</option>
+                <option value="response">response ⤝</option>
+              </select>
+              <input value={s.label} placeholder="message"
+                onChange={(e) => onSetLabel(i, e.target.value)}
+                className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0" />
+            </div>
+          </li>
+        ))}
+        {steps.length === 0 && (
+          <li className="px-3 py-3 text-[10.5px] text-muted-foreground italic">No steps yet.</li>
+        )}
+      </ol>
+      <div className="flex items-center gap-2 px-3 py-2 border-t border-border">
+        <button onClick={onReset} disabled={steps.length === 0}
+          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground disabled:opacity-40">
+          Reset
+        </button>
+        <div className="flex-1" />
+        <button onClick={onSave} disabled={steps.length === 0}
+          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-accent/60 bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40">
+          Save as scenario
+        </button>
+      </div>
     </div>
   );
 }

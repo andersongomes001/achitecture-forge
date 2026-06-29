@@ -69,8 +69,12 @@ export interface ArchElement {
   inboxStoreId?: string;
   /** outbox: where the relay publishes (topic / queue / broker element id). */
   outboxTargetId?: string;
+  /** outbox: additional publish destinations beyond the primary one. */
+  outboxTargetIds?: string[];
   /** inbox: where messages are consumed from (topic / queue / broker element id). */
   inboxSourceId?: string;
+  /** inbox: additional consume sources beyond the primary one. */
+  inboxSourceIds?: string[];
   /** inbox: database hosting the dedup table — typically the same DB bound to the outbox. */
   inboxDbId?: string;
 
