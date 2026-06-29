@@ -790,6 +790,7 @@ function ForgePage() {
               selectedId={selectedId}
               onSelect={onCanvasSelect}
               managedEdges={managedEdges}
+              layoutTick={layoutTick}
               onDropType={(type, pos) => addElement(type, pos)}
               onAddDlq={(id) => setElements((es) => addDlqFor(es, id))}
               onAddRetry={(id) => setElements((es) => addRetryFor(es, id))}
