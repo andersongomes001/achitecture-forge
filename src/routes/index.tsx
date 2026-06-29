@@ -317,9 +317,12 @@ function ForgePage() {
       if (el.type === "inbox-store" && el.isInboxFor && ids.has(el.isInboxFor)) {
         out.push({ id: `mng:inbox:${el.isInboxFor}->${el.id}`, source: el.isInboxFor, target: el.id, kind: "inbox-of", label: "dedup" });
         const svc = elements.find((e) => e.id === el.isInboxFor);
-        // messages consumed from the configured source flow into the inbox store
-        if (svc?.inboxSourceId && ids.has(svc.inboxSourceId)) {
-          out.push({ id: `mng:consume:${svc.inboxSourceId}->${el.id}`, source: svc.inboxSourceId, target: el.id, kind: "consume", label: "consume" });
+        // messages consumed from the configured source(s) flow into the inbox store
+        const consumeSources = [svc?.inboxSourceId, ...(svc?.inboxSourceIds ?? [])].filter(Boolean) as string[];
+        for (const sId of Array.from(new Set(consumeSources))) {
+          if (ids.has(sId)) {
+            out.push({ id: `mng:consume:${sId}->${el.id}`, source: sId, target: el.id, kind: "consume", label: "consume" });
+          }
         }
         // inbox dedup table lives in a database (often the same as the outbox DB)
         if (svc?.inboxDbId && ids.has(svc.inboxDbId)) {
