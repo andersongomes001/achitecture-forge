@@ -4,6 +4,7 @@ import { Inspector } from "@/components/arch/Inspector";
 import { parseSequence } from "@/lib/arch/parser";
 import { importFromMermaid } from "@/lib/arch/import";
 import { generateMermaid } from "@/lib/arch/generate";
+import { MermaidView } from "@/components/arch/MermaidView";
 import { computeLoad, fmtRate, type LoadRow, type LoadResult, type LoadStatus } from "@/lib/arch/load";
 import { simulate } from "@/lib/arch/simulator";
 import {
@@ -227,6 +228,7 @@ function ForgePage() {
   const [builderMode, setBuilderMode] = useState(false);
   const [builderSteps, setBuilderSteps] = useState<BuilderStep[]>([]);
   const [builderPending, setBuilderPending] = useState<string | null>(null);
+  const [seqRender, setSeqRender] = useState(false);
 
   function setElements(updater: ArchElement[] | ((prev: ArchElement[]) => ArchElement[])) {
     setElementsRaw((prev) => {
@@ -545,6 +547,54 @@ function ForgePage() {
     setPlaying(false);
   }
 
+  // ----- infer a sequence by traversing the canvas from an entry-point -----
+  function inferBuilderFrom(entryId: string) {
+    const flowKind = (k: EdgeKind): BuilderStep["kind"] | null => {
+      if (k === "sync" || k === "direct") return "sync";
+      if (k === "response") return "response";
+      if (
+        k === "async" || k === "fanout" || k === "pubsub" || k === "topic-route" ||
+        k === "headers" || k === "relay-publish" || k === "consume" ||
+        k === "publish" || k === "subscribe"
+      )
+        return "async";
+      return null; // structural edges (owns / dlq / replica / hosts …)
+    };
+
+    const all = [...canvasState.edges, ...managedEdges];
+    const outgoing = new Map<string, { to: string; kind: BuilderStep["kind"] }[]>();
+    for (const e of all) {
+      const k = flowKind(e.kind as EdgeKind);
+      if (!k) continue;
+      const arr = outgoing.get(e.source) ?? [];
+      arr.push({ to: e.target, kind: k });
+      outgoing.set(e.source, arr);
+    }
+
+    const steps: BuilderStep[] = [];
+    const visitedEdges = new Set<string>();
+    const stack = [entryId];
+    while (stack.length) {
+      const node = stack.shift()!;
+      for (const { to, kind } of outgoing.get(node) ?? []) {
+        const key = `${node}->${to}:${kind}`;
+        if (visitedEdges.has(key)) continue;
+        visitedEdges.add(key);
+        steps.push({ from: node, to, kind, label: "" });
+        stack.push(to);
+      }
+    }
+
+    if (steps.length === 0) {
+      // eslint-disable-next-line no-alert
+      alert("No outgoing connections found from this entry-point. Connect components on the canvas first.");
+      return;
+    }
+    setBuilderSteps(steps);
+    setBuilderPending(null);
+    setBuilderMode(true);
+  }
+
   // ----- scenarios (multiple sequence diagrams) -----
   function addScenario() {
     const id = `s${uid()}`;
@@ -756,6 +806,7 @@ function ForgePage() {
                 onClearPending={() => setBuilderPending(null)}
                 onReset={() => { setBuilderSteps([]); setBuilderPending(null); }}
                 onSave={saveBuilderScenario}
+                onInfer={inferBuilderFrom}
                 onClose={() => { setBuilderMode(false); setBuilderPending(null); }}
               />
             )}
@@ -822,15 +873,25 @@ function ForgePage() {
                         className="px-2 py-1 rounded text-[11px] border border-border text-muted-foreground hover:text-primary hover:border-primary/40">
                         + new
                       </button>
+                      <div className="flex-1" />
+                      <button onClick={() => setSeqRender((v) => !v)}
+                        className={`px-2 py-1 rounded text-[11px] border whitespace-nowrap ${seqRender ? "border-primary/60 bg-primary/20 text-primary" : "border-border text-muted-foreground hover:text-primary hover:border-primary/40"}`}>
+                        {seqRender ? "✎ Edit code" : "▣ Render diagram"}
+                      </button>
                     </div>
-                    <textarea
-                      className="mono flex-1 w-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
-                      value={seqCode}
-                      spellCheck={false}
-                      onChange={(e) => setSeqCode(e.target.value)}
-                    />
+                    {seqRender ? (
+                      <MermaidView code={seqCode} className="flex-1 overflow-auto bg-surface-2 p-3" />
+                    ) : (
+                      <textarea
+                        className="mono flex-1 w-full bg-surface-2 text-foreground text-[12px] leading-relaxed p-3 outline-none resize-none"
+                        value={seqCode}
+                        spellCheck={false}
+                        onChange={(e) => setSeqCode(e.target.value)}
+                      />
+                    )}
                   </div>
                 )}
+
                 {drawerTab === "load" && (
                   <LoadView load={load} />
                 )}
@@ -962,7 +1023,7 @@ function Legend() {
 }
 
 function BuilderPanel({
-  steps, pending, elements, onSetKind, onSetLabel, onRemove, onClearPending, onReset, onSave, onClose,
+  steps, pending, elements, onSetKind, onSetLabel, onRemove, onClearPending, onReset, onSave, onInfer, onClose,
 }: {
   steps: BuilderStep[];
   pending: string | null;
@@ -973,23 +1034,46 @@ function BuilderPanel({
   onClearPending: () => void;
   onReset: () => void;
   onSave: () => void;
+  onInfer: (entryId: string) => void;
   onClose: () => void;
 }) {
   const nameOf = (id: string) => elements.find((e) => e.id === id)?.name ?? id;
+  const entryCandidates = elements.filter(
+    (e) => e.type === "service" || e.type === "api-gateway" || e.type === "external" || e.type === "scheduler" || e.type === "lambda",
+  );
+  const [entry, setEntry] = useState(entryCandidates[0]?.id ?? "");
   return (
     <div className="absolute top-3 right-3 z-20 w-[300px] bg-surface/95 backdrop-blur border border-accent/50 rounded-lg shadow-2xl flex flex-col max-h-[70%]">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-accent">✎ Sequence builder</span>
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
       </div>
+      <div className="px-3 py-2 border-b border-border space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Infer from entry-point</div>
+        <div className="flex items-center gap-1">
+          <select value={entry} onChange={(e) => setEntry(e.target.value)}
+            className="text-[10.5px] bg-surface border border-border rounded px-1 py-1 outline-none flex-1 min-w-0">
+            {entryCandidates.length === 0 && <option value="">no entry components</option>}
+            {entryCandidates.map((e) => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+          <button onClick={() => entry && onInfer(entry)} disabled={!entry}
+            className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-accent/60 bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40 whitespace-nowrap">
+            ⌁ Infer
+          </button>
+        </div>
+        <div className="text-[10px] text-muted-foreground leading-snug">Walks the canvas connections from the selected component to build the steps automatically.</div>
+      </div>
       <div className="px-3 py-2 text-[10.5px] text-muted-foreground leading-snug border-b border-border">
         {pending ? (
           <span>From <b className="text-accent">{nameOf(pending)}</b> — now click the target component.{" "}
             <button onClick={onClearPending} className="underline hover:text-foreground">cancel</button></span>
         ) : (
-          <span>Click a component on the canvas to start a step (source → target).</span>
+          <span>Or click a component on the canvas to start a step (source → target).</span>
         )}
       </div>
+
       <ol className="flex-1 overflow-auto divide-y divide-border">
         {steps.map((s, i) => (
           <li key={i} className="px-3 py-2 space-y-1">
