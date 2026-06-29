@@ -1,0 +1,10 @@
+services:
+  prod:
+    build:
+      context: .
+      target: prod
+    container_name: archforge-prod
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production

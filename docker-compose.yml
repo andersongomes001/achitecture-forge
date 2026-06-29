@@ -1,0 +1,20 @@
+# Architecture Forge
+# Uso:
+#   docker compose up -d          # dev mode com hot-reload
+#   docker compose run --rm dev   # mesma coisa, mas attachado
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d  # produção
+
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    container_name: archforge-dev
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules    # evitar sobrescrever node_modules do container
+    environment:
+      - NODE_ENV=development
+    command: ["bun", "run", "dev", "--host", "0.0.0.0"]
