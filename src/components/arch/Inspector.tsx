@@ -132,6 +132,15 @@ export function Inspector(props: Props) {
                   {!element.outboxTargetId && (
                     <p className="text-[9.5px] text-warning">Relay has no destination — pick where events are published.</p>
                   )}
+                  <div className="space-y-1 pt-1">
+                    <span className="text-[10px] uppercase tracking-wider text-accent">also publishes to</span>
+                    <TargetListEditor
+                      ids={element.outboxTargetIds ?? []}
+                      options={destinations.filter((d) => d.id !== element.outboxTargetId)}
+                      addLabel="+ destination"
+                      onChange={(ids) => props.onChange({ outboxTargetIds: ids })}
+                    />
+                  </div>
                 </div>
               )}
               <ToggleRow
