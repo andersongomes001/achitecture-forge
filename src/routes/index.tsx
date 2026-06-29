@@ -806,6 +806,7 @@ function ForgePage() {
                 onClearPending={() => setBuilderPending(null)}
                 onReset={() => { setBuilderSteps([]); setBuilderPending(null); }}
                 onSave={saveBuilderScenario}
+                onInfer={inferBuilderFrom}
                 onClose={() => { setBuilderMode(false); setBuilderPending(null); }}
               />
             )}
