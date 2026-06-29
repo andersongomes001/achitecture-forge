@@ -37,12 +37,29 @@ fluxos como diagramas de sequência (Mermaid) e roda simulações que apontam ri
 
 ## Desenvolvimento
 
+### Local (requer Bun)
+
 ```bash
 bun install
 bun run dev      # servidor de desenvolvimento (Vite)
 bun run build    # build de produção
 bun run lint     # ESLint
 ```
+
+### Docker (sem instalar nada na máquina)
+
+```bash
+# Dev com hot-reload
+docker compose up -d
+
+# Produção
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+# Parar
+docker compose down
+```
+
+Acesse em `http://localhost:3000`. Para usar outra porta: `PORT=8080 docker compose up -d`.
 
 ## Estrutura
 
