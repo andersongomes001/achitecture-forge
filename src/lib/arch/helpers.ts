@@ -83,10 +83,12 @@ export function setInbox(list: ArchElement[], serviceId: string, on: boolean): A
   const svc = list.find((e) => e.id === serviceId);
   if (!svc) return list;
   if (svc.type !== "service" && svc.type !== "queue") {
-    return patchElement(list, serviceId, { hasInbox: on });
+    // Inbox is the idempotency mechanism — enabling it implies idempotent processing.
+    return patchElement(list, serviceId, { hasInbox: on, idempotent: on ? true : svc.idempotent });
   }
   if (on) {
-    if (svc.inboxStoreId) return patchElement(list, serviceId, { hasInbox: true });
+    if (svc.inboxStoreId)
+      return patchElement(list, serviceId, { hasInbox: true, idempotent: true });
     const inboxId = uniqueId(list, `${serviceId}_INBOX`);
     const inbox: ArchElement = {
       id: inboxId,
@@ -94,7 +96,12 @@ export function setInbox(list: ArchElement[], serviceId: string, on: boolean): A
       type: "inbox-store",
       isInboxFor: serviceId,
     };
-    return patchElement([...list, inbox], serviceId, { hasInbox: true, inboxStoreId: inboxId });
+    // Inbox guarantees idempotency by deduplicating on message id.
+    return patchElement([...list, inbox], serviceId, {
+      hasInbox: true,
+      idempotent: true,
+      inboxStoreId: inboxId,
+    });
   }
   let next = list;
   if (svc.inboxStoreId) next = next.filter((e) => e.id !== svc.inboxStoreId);
