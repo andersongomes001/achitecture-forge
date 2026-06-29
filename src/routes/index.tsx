@@ -961,6 +961,75 @@ function Legend() {
   );
 }
 
+function BuilderPanel({
+  steps, pending, elements, onSetKind, onSetLabel, onRemove, onClearPending, onReset, onSave, onClose,
+}: {
+  steps: BuilderStep[];
+  pending: string | null;
+  elements: ArchElement[];
+  onSetKind: (i: number, k: BuilderStep["kind"]) => void;
+  onSetLabel: (i: number, l: string) => void;
+  onRemove: (i: number) => void;
+  onClearPending: () => void;
+  onReset: () => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const nameOf = (id: string) => elements.find((e) => e.id === id)?.name ?? id;
+  return (
+    <div className="absolute top-3 right-3 z-20 w-[300px] bg-surface/95 backdrop-blur border border-accent/50 rounded-lg shadow-2xl flex flex-col max-h-[70%]">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-accent">✎ Sequence builder</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
+      </div>
+      <div className="px-3 py-2 text-[10.5px] text-muted-foreground leading-snug border-b border-border">
+        {pending ? (
+          <span>From <b className="text-accent">{nameOf(pending)}</b> — now click the target component.{" "}
+            <button onClick={onClearPending} className="underline hover:text-foreground">cancel</button></span>
+        ) : (
+          <span>Click a component on the canvas to start a step (source → target).</span>
+        )}
+      </div>
+      <ol className="flex-1 overflow-auto divide-y divide-border">
+        {steps.map((s, i) => (
+          <li key={i} className="px-3 py-2 space-y-1">
+            <div className="flex items-center gap-1 text-[11px]">
+              <span className="mono w-5 text-muted-foreground">{i + 1}.</span>
+              <span className="truncate flex-1">{nameOf(s.from)} → {nameOf(s.to)}</span>
+              <button onClick={() => onRemove(i)} className="text-muted-foreground hover:text-destructive text-[10px]">✕</button>
+            </div>
+            <div className="flex items-center gap-1 pl-5">
+              <select value={s.kind} onChange={(e) => onSetKind(i, e.target.value as BuilderStep["kind"])}
+                className="text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none">
+                <option value="sync">sync →</option>
+                <option value="async">async ⇢</option>
+                <option value="response">response ⤝</option>
+              </select>
+              <input value={s.label} placeholder="message"
+                onChange={(e) => onSetLabel(i, e.target.value)}
+                className="mono text-[10px] bg-surface border border-border rounded px-1 py-0.5 outline-none flex-1 min-w-0" />
+            </div>
+          </li>
+        ))}
+        {steps.length === 0 && (
+          <li className="px-3 py-3 text-[10.5px] text-muted-foreground italic">No steps yet.</li>
+        )}
+      </ol>
+      <div className="flex items-center gap-2 px-3 py-2 border-t border-border">
+        <button onClick={onReset} disabled={steps.length === 0}
+          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground disabled:opacity-40">
+          Reset
+        </button>
+        <div className="flex-1" />
+        <button onClick={onSave} disabled={steps.length === 0}
+          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-accent/60 bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40">
+          Save as scenario
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LoadView({ load }: { load: LoadResult }) {
   if (load.rows.length === 0) {
     return (
