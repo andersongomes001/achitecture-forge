@@ -175,6 +175,15 @@ export function Inspector(props: Props) {
                       ))}
                     </select>
                   </Row>
+                  <div className="space-y-1 pt-1">
+                    <span className="text-[10px] uppercase tracking-wider text-success">also consumes from</span>
+                    <TargetListEditor
+                      ids={element.inboxSourceIds ?? []}
+                      options={destinations.filter((d) => d.id !== element.inboxSourceId)}
+                      addLabel="+ source"
+                      onChange={(ids) => props.onChange({ inboxSourceIds: ids })}
+                    />
+                  </div>
                   <p className="text-[9.5px] text-muted-foreground">Inbox table can live in the same database bound to the outbox — just a separate table.</p>
                   {!element.inboxSourceId && (
                     <p className="text-[9.5px] text-warning">Inbox has no source — pick where messages arrive.</p>
