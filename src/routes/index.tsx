@@ -1013,7 +1013,7 @@ function Legend() {
 }
 
 function BuilderPanel({
-  steps, pending, elements, onSetKind, onSetLabel, onRemove, onClearPending, onReset, onSave, onClose,
+  steps, pending, elements, onSetKind, onSetLabel, onRemove, onClearPending, onReset, onSave, onInfer, onClose,
 }: {
   steps: BuilderStep[];
   pending: string | null;
@@ -1024,23 +1024,46 @@ function BuilderPanel({
   onClearPending: () => void;
   onReset: () => void;
   onSave: () => void;
+  onInfer: (entryId: string) => void;
   onClose: () => void;
 }) {
   const nameOf = (id: string) => elements.find((e) => e.id === id)?.name ?? id;
+  const entryCandidates = elements.filter(
+    (e) => e.type === "service" || e.type === "api-gateway" || e.type === "external" || e.type === "scheduler" || e.type === "lambda",
+  );
+  const [entry, setEntry] = useState(entryCandidates[0]?.id ?? "");
   return (
     <div className="absolute top-3 right-3 z-20 w-[300px] bg-surface/95 backdrop-blur border border-accent/50 rounded-lg shadow-2xl flex flex-col max-h-[70%]">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-accent">✎ Sequence builder</span>
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
       </div>
+      <div className="px-3 py-2 border-b border-border space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Infer from entry-point</div>
+        <div className="flex items-center gap-1">
+          <select value={entry} onChange={(e) => setEntry(e.target.value)}
+            className="text-[10.5px] bg-surface border border-border rounded px-1 py-1 outline-none flex-1 min-w-0">
+            {entryCandidates.length === 0 && <option value="">no entry components</option>}
+            {entryCandidates.map((e) => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+          <button onClick={() => entry && onInfer(entry)} disabled={!entry}
+            className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-accent/60 bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40 whitespace-nowrap">
+            ⌁ Infer
+          </button>
+        </div>
+        <div className="text-[10px] text-muted-foreground leading-snug">Walks the canvas connections from the selected component to build the steps automatically.</div>
+      </div>
       <div className="px-3 py-2 text-[10.5px] text-muted-foreground leading-snug border-b border-border">
         {pending ? (
           <span>From <b className="text-accent">{nameOf(pending)}</b> — now click the target component.{" "}
             <button onClick={onClearPending} className="underline hover:text-foreground">cancel</button></span>
         ) : (
-          <span>Click a component on the canvas to start a step (source → target).</span>
+          <span>Or click a component on the canvas to start a step (source → target).</span>
         )}
       </div>
+
       <ol className="flex-1 overflow-auto divide-y divide-border">
         {steps.map((s, i) => (
           <li key={i} className="px-3 py-2 space-y-1">
